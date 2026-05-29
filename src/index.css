@@ -1,12 +1,13 @@
 :root {
-  --app-font-family:
+  --app-font:
+    "Heebo",
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     Arial,
     sans-serif;
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
   color: #172033;
   background: #eef2f7;
   font-synthesis: none;
@@ -21,22 +22,35 @@
 
 html {
   direction: rtl;
+  font-family: var(--app-font);
 }
 
 body {
   min-width: 320px;
   min-height: 100svh;
   margin: 0;
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
+}
+
+#root {
+  min-height: 100svh;
+  font-family: var(--app-font);
 }
 
 button,
 input,
 textarea,
-select {
+select,
+option {
   font: inherit;
+  font-family: var(--app-font);
 }
 
-#root {
-  min-height: 100svh;
+.react-flow,
+.react-flow__node,
+.react-flow__edge-text,
+.react-flow__edge-textbg,
+.react-flow__controls,
+.react-flow__panel {
+  font-family: var(--app-font);
 }

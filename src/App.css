@@ -7,7 +7,7 @@
   overflow: hidden;
   background: #eef2f7;
   color: #172033;
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
 }
 
 .app-shell button,
@@ -16,7 +16,7 @@
 .app-shell select,
 .react-flow,
 .react-flow__edge-text {
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
 }
 
 .top-toolbar {
@@ -286,7 +286,7 @@
 }
 
 .properties-panel__control--code {
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
   text-align: left;
 }
 
@@ -490,7 +490,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #b42318;
-  font: 900 17px/1 var(--app-font-family);
+  font: 900 17px/1 var(--app-font);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -607,7 +607,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #b42318;
-  font: 900 17px/1 var(--app-font-family);
+  font: 900 17px/1 var(--app-font);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -674,7 +674,7 @@
 
 .decision-node__id {
   color: #64748b;
-  font-family: var(--app-font-family);
+  font-family: var(--app-font);
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0;
@@ -803,7 +803,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #b42318;
-  font: 900 14px/1 var(--app-font-family);
+  font: 900 14px/1 var(--app-font);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -849,7 +849,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #173d9a;
-  font: 900 20px/1 var(--app-font-family);
+  font: 900 20px/1 var(--app-font);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -1156,7 +1156,7 @@
   min-height: 260px;
   background: #0f172a;
   color: #e2e8f0;
-  font: 500 0.88rem/1.55 var(--app-font-family);
+  font: 500 0.88rem/1.55 var(--app-font);
   resize: vertical;
   text-align: left;
 }
@@ -1370,7 +1370,7 @@
   border-radius: 8px;
   background: #0f172a;
   color: #e2e8f0;
-  font: 500 0.88rem/1.55 var(--app-font-family);
+  font: 500 0.88rem/1.55 var(--app-font);
   text-align: left;
   resize: none;
   white-space: pre;
