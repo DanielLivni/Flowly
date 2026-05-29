@@ -23,13 +23,17 @@ import {
   type EdgeProps,
   type EdgeTypes,
   getSmoothStepPath,
+  getBezierPath,
   type IsValidConnection,
   type Node,
   type NodeMouseHandler,
   type NodeProps,
   type NodeTypes,
+  type OnConnectEnd,
+  type OnConnectStart,
   type ReactFlowInstance,
   type Viewport,
+  type XYPosition,
   useEdgesState,
   useNodesState,
   useUpdateNodeInternals,
@@ -43,6 +47,16 @@ import './App.css'
 type DecisionNodeType = 'question' | 'choice' | 'instruction' | 'note' | 'end'
 
 type CanvasMode = 'pan' | 'select'
+
+type EdgeStyle = 'orthogonal' | 'curved'
+
+type DirectSourcePosition = 'left' | 'bottom'
+
+type TargetHandleId =
+  | 'target-top'
+  | 'target-right'
+  | 'target-bottom'
+  | 'target-left'
 
 type DecisionOption = {
   id: string
@@ -61,30 +75,59 @@ type DecisionLink = {
   itemId: string
 }
 
+type DecisionParameterUpdate = {
+  id: string
+  name: string
+  value: string
+}
+
+type DecisionAction = {
+  id: string
+  name: string
+}
+
+type DecisionTool = {
+  id: string
+  name: string
+}
+
 type DecisionNodeData = {
   nodeType: DecisionNodeType
   script: string
   options: DecisionOption[]
   images: DecisionImage[]
   links: DecisionLink[]
+  parameterUpdates: DecisionParameterUpdate[]
+  actions: DecisionAction[]
+  tools: DecisionTool[]
   edgeHighlightRole?: 'source' | 'target'
   highlightedOptionId?: string | null
   isEntryNode?: boolean
   isMultiSelected?: boolean
+  directSourcePosition?: DirectSourcePosition
   onAddOption?: (nodeId: string) => void
+  onDeleteNode?: (nodeId: string) => void
+  onDeleteOption?: (nodeId: string, optionId: string) => void
+  onOptionLabelChange?: (nodeId: string, optionId: string, label: string) => void
   onScriptChange?: (nodeId: string, script: string) => void
   onToggleMultiSelect?: (nodeId: string, isSelected: boolean) => void
 }
 
-type LegacyDecisionNodeData = Partial<Omit<DecisionNodeData, 'options'>> & {
+type LegacyDecisionNodeData = Partial<
+  Omit<DecisionNodeData, 'actions' | 'options' | 'parameterUpdates' | 'tools'>
+> & {
   nodeType?: DecisionNodeType
   imageKey?: string
   options?: Array<DecisionOption | string>
+  parameterUpdates?: Array<Partial<DecisionParameterUpdate>>
+  actions?: Array<Partial<DecisionAction>>
+  tools?: Array<Partial<DecisionTool>>
 }
 
 type DecisionNode = Node<DecisionNodeData, 'decision'>
 
 type DecisionEdgeData = {
+  edgeStyle?: EdgeStyle
   onDelete?: (edgeId: string) => void
 }
 
@@ -104,6 +147,10 @@ type ScenarioMetadata = {
 }
 
 type YamlExport = {
+  draft?: {
+    hasValidationIssues: boolean
+    exportedWithErrors: boolean
+  }
   scenario: {
     entryStepId: string
     glassixKnowledgeItemName: string
@@ -113,6 +160,7 @@ type YamlExport = {
   }
   steps: YamlExportStep[]
   _editor: {
+    edgeStyle: EdgeStyle
     viewport: Viewport
     positions: Record<
       string,
@@ -135,6 +183,16 @@ type YamlExportStep = {
   links?: Array<{
     label: string
     itemId: string
+  }>
+  parameterUpdates?: Array<{
+    name: string
+    value: string
+  }>
+  actions?: Array<{
+    name: string
+  }>
+  tools?: Array<{
+    name: string
   }>
   options?: YamlExportOption[]
   next?: string
@@ -171,16 +229,23 @@ type ImportedStep = {
   script: string
   images: Array<Omit<DecisionImage, 'id'>>
   links: Array<Omit<DecisionLink, 'id'>>
+  parameterUpdates: Array<Omit<DecisionParameterUpdate, 'id'>>
+  actions: Array<Omit<DecisionAction, 'id'>>
+  tools: Array<Omit<DecisionTool, 'id'>>
   options: ImportedStepOption[]
   next: string
 }
 
 type ImportedFlow = {
   edges: DecisionEdge[]
+  nextActionNumber: number
   nextImageNumber: number
   nextLinkNumber: number
   nextOptionNumber: number
+  nextParameterUpdateNumber: number
+  nextToolNumber: number
   nodes: DecisionNode[]
+  edgeStyle: EdgeStyle
   scenarioMetadata: ScenarioMetadata
   shouldFitView: boolean
   viewport?: Viewport
@@ -200,6 +265,13 @@ type EntryNodeSelectProps = {
   onEntryNodeChange: (nodeId: string) => void
 }
 
+type PendingConnectionPopover = {
+  sourceId: string
+  sourceHandle: string
+  nodePosition: XYPosition
+  popoverPosition: XYPosition
+}
+
 const typeLabels: Record<DecisionNodeType, string> = {
   question: 'שאלה',
   choice: 'בחירה',
@@ -216,6 +288,11 @@ const canvasModeLabels: Record<CanvasMode, string> = {
 const canvasModeHelperText: Record<CanvasMode, string> = {
   pan: 'גרור את הרקע כדי לזוז במפה',
   select: 'גרור על הרקע כדי לסמן כמה שלבים',
+}
+
+const edgeStyleLabels: Record<EdgeStyle, string> = {
+  orthogonal: 'קווים זוויתיים',
+  curved: 'קווים מעוקלים',
 }
 
 const sidebarActions: SidebarAction[] = [
@@ -268,6 +345,37 @@ const getNextStepId = (stepIds: Iterable<string>) =>
 
 const DIRECT_SOURCE_HANDLE_ID = 'out'
 const DIRECT_EDGE_LABEL = 'המשך'
+const DEFAULT_EDGE_STYLE: EdgeStyle = 'orthogonal'
+const TARGET_HANDLE_TOP: TargetHandleId = 'target-top'
+const TARGET_HANDLE_RIGHT: TargetHandleId = 'target-right'
+const TARGET_HANDLE_BOTTOM: TargetHandleId = 'target-bottom'
+const TARGET_HANDLE_LEFT: TargetHandleId = 'target-left'
+const targetHandleConfigs: Array<{
+  className: string
+  id: TargetHandleId
+  position: Position
+}> = [
+  {
+    className: 'decision-node__target-handle decision-node__target-handle--top',
+    id: TARGET_HANDLE_TOP,
+    position: Position.Top,
+  },
+  {
+    className: 'decision-node__target-handle decision-node__target-handle--right',
+    id: TARGET_HANDLE_RIGHT,
+    position: Position.Right,
+  },
+  {
+    className: 'decision-node__target-handle decision-node__target-handle--bottom',
+    id: TARGET_HANDLE_BOTTOM,
+    position: Position.Bottom,
+  },
+  {
+    className: 'decision-node__target-handle decision-node__target-handle--left',
+    id: TARGET_HANDLE_LEFT,
+    position: Position.Left,
+  },
+]
 const initialViewport: Viewport = { x: 40, y: 40, zoom: 0.95 }
 const nodeLayoutWidth = 218
 const nodeLayoutHeight = 140
@@ -302,12 +410,18 @@ const getViewportFromUnknown = (value: unknown): Viewport | undefined => {
   return { x, y, zoom }
 }
 
+const getEdgeStyleFromUnknown = (value: unknown): EdgeStyle =>
+  value === 'curved' || value === 'orthogonal' ? value : DEFAULT_EDGE_STYLE
+
 const createNodeData = (nodeType: DecisionNodeType): DecisionNodeData => ({
   nodeType,
   script: '',
   options: [],
   images: [],
   links: [],
+  parameterUpdates: [],
+  actions: [],
+  tools: [],
 })
 
 const normalizeOptions = (
@@ -318,6 +432,31 @@ const normalizeOptions = (
       ? { id: `option-${optionIndex + 1}`, label: option }
       : option,
   )
+
+const normalizeParameterUpdates = (
+  parameterUpdates: Array<Partial<DecisionParameterUpdate>> | undefined,
+): DecisionParameterUpdate[] =>
+  (parameterUpdates ?? []).map((parameterUpdate, parameterUpdateIndex) => ({
+    id: parameterUpdate.id ?? `parameter-${parameterUpdateIndex + 1}`,
+    name: parameterUpdate.name ?? '',
+    value: parameterUpdate.value ?? '',
+  }))
+
+const normalizeActions = (
+  actions: Array<Partial<DecisionAction>> | undefined,
+): DecisionAction[] =>
+  (actions ?? []).map((action, actionIndex) => ({
+    id: action.id ?? `action-${actionIndex + 1}`,
+    name: action.name ?? '',
+  }))
+
+const normalizeTools = (
+  tools: Array<Partial<DecisionTool>> | undefined,
+): DecisionTool[] =>
+  (tools ?? []).map((tool, toolIndex) => ({
+    id: tool.id ?? `tool-${toolIndex + 1}`,
+    name: tool.name ?? '',
+  }))
 
 const normalizeNodeData = (
   data: DecisionNodeData | LegacyDecisionNodeData,
@@ -332,11 +471,18 @@ const normalizeNodeData = (
       data.images ??
       (legacyImageKey ? [{ id: 'image-1', key: legacyImageKey, title: '' }] : []),
     links: data.links ?? [],
+    parameterUpdates: normalizeParameterUpdates(data.parameterUpdates),
+    actions: normalizeActions(data.actions),
+    tools: normalizeTools(data.tools),
     edgeHighlightRole: data.edgeHighlightRole,
     highlightedOptionId: data.highlightedOptionId,
     isEntryNode: data.isEntryNode,
     isMultiSelected: data.isMultiSelected,
+    directSourcePosition: data.directSourcePosition,
     onAddOption: data.onAddOption,
+    onDeleteNode: data.onDeleteNode,
+    onDeleteOption: data.onDeleteOption,
+    onOptionLabelChange: data.onOptionLabelChange,
     onScriptChange: data.onScriptChange,
     onToggleMultiSelect: data.onToggleMultiSelect,
   }
@@ -381,6 +527,149 @@ const getOutgoingEdgeForHandle = (
       edge.source === sourceId &&
       (edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID) === sourceHandle,
   )
+
+const canCreateOutgoingConnection = (
+  sourceId: string,
+  sourceHandle: string | null | undefined,
+  nodes: DecisionNode[],
+  edges: DecisionEdge[],
+) => {
+  const sourceData = getNodeDataById(nodes, sourceId)
+
+  if (!sourceData || sourceData.nodeType === 'end') {
+    return false
+  }
+
+  const normalizedSourceHandle = isDirectSourceHandle(sourceHandle)
+    ? DIRECT_SOURCE_HANDLE_ID
+    : sourceHandle
+
+  if (sourceData.options.length > 0) {
+    if (normalizedSourceHandle === DIRECT_SOURCE_HANDLE_ID) {
+      return false
+    }
+
+    if (
+      !sourceData.options.some(
+        (option) => option.id === normalizedSourceHandle,
+      )
+    ) {
+      return false
+    }
+  } else if (normalizedSourceHandle !== DIRECT_SOURCE_HANDLE_ID) {
+    return false
+  }
+
+  return !edges.some(
+    (edge) =>
+      edge.source === sourceId &&
+      (edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID) === normalizedSourceHandle,
+  )
+}
+
+const getClientPositionFromEvent = (
+  event: MouseEvent | TouchEvent,
+): XYPosition | null => {
+  if ('changedTouches' in event) {
+    const touch = event.changedTouches[0]
+
+    return touch ? { x: touch.clientX, y: touch.clientY } : null
+  }
+
+  return { x: event.clientX, y: event.clientY }
+}
+
+const clampNumber = (value: number, min: number, max: number) => {
+  const lowerBound = Math.min(min, max)
+  const upperBound = Math.max(min, max)
+
+  return Math.min(Math.max(value, lowerBound), upperBound)
+}
+
+const getNodeCenterPosition = (node: DecisionNode) => ({
+  x:
+    node.position.x +
+    (typeof node.width === 'number' ? node.width : nodeLayoutWidth) / 2,
+  y:
+    node.position.y +
+    (typeof node.height === 'number' ? node.height : nodeLayoutHeight) / 2,
+})
+
+const getNodePositionDelta = (sourceNode: DecisionNode, targetNode: DecisionNode) => {
+  const sourceCenter = getNodeCenterPosition(sourceNode)
+  const targetCenter = getNodeCenterPosition(targetNode)
+
+  return {
+    x: targetCenter.x - sourceCenter.x,
+    y: targetCenter.y - sourceCenter.y,
+  }
+}
+
+const getPreferredTargetHandle = (
+  sourceNode: DecisionNode,
+  targetNode: DecisionNode,
+): TargetHandleId => {
+  const delta = getNodePositionDelta(sourceNode, targetNode)
+
+  if (Math.abs(delta.y) >= Math.abs(delta.x)) {
+    return delta.y >= 0 ? TARGET_HANDLE_TOP : TARGET_HANDLE_BOTTOM
+  }
+
+  return delta.x >= 0 ? TARGET_HANDLE_LEFT : TARGET_HANDLE_RIGHT
+}
+
+const getPreferredDirectSourcePosition = (
+  sourceNode: DecisionNode,
+  targetNode: DecisionNode,
+): DirectSourcePosition => {
+  const delta = getNodePositionDelta(sourceNode, targetNode)
+
+  return delta.y > 0 && Math.abs(delta.y) >= Math.abs(delta.x)
+    ? 'bottom'
+    : 'left'
+}
+
+const getConnectionWithPreferredHandles = (
+  connection: Connection,
+  nodes: DecisionNode[],
+): Connection => {
+  const sourceNode = nodes.find((node) => node.id === connection.source)
+  const targetNode = nodes.find((node) => node.id === connection.target)
+
+  if (!sourceNode || !targetNode) {
+    return connection
+  }
+
+  return {
+    ...connection,
+    targetHandle: getPreferredTargetHandle(sourceNode, targetNode),
+  }
+}
+
+const getPreferredTargetHandleForEdge = (
+  edge: DecisionEdge,
+  nodes: DecisionNode[],
+) => {
+  const sourceNode = nodes.find((node) => node.id === edge.source)
+  const targetNode = nodes.find((node) => node.id === edge.target)
+
+  return sourceNode && targetNode
+    ? getPreferredTargetHandle(sourceNode, targetNode)
+    : edge.targetHandle
+}
+
+const getDirectSourcePositionForNode = (
+  node: DecisionNode,
+  nodes: DecisionNode[],
+  edges: DecisionEdge[],
+): DirectSourcePosition => {
+  const directEdge = getOutgoingEdgeForHandle(edges, node.id, DIRECT_SOURCE_HANDLE_ID)
+  const targetNode = directEdge
+    ? nodes.find((currentNode) => currentNode.id === directEdge.target)
+    : null
+
+  return targetNode ? getPreferredDirectSourcePosition(node, targetNode) : 'left'
+}
 
 const createDecisionEdge = (
   connection: Connection,
@@ -509,16 +798,19 @@ const normalizeEdgesForNodes = (
     usedOutgoingHandles.add(outgoingHandleKey)
 
     const label = option ? getOptionEdgeLabel(option.label) : DIRECT_EDGE_LABEL
+    const preferredTargetHandle = getPreferredTargetHandleForEdge(edge, nodes)
 
     if (
       edge.label !== label ||
       edge.sourceHandle !== normalizedSourceHandle ||
+      edge.targetHandle !== preferredTargetHandle ||
       edge.type !== 'deletable'
     ) {
       nextEdges.push({
         ...edge,
         label,
         sourceHandle: normalizedSourceHandle,
+        targetHandle: preferredTargetHandle ?? null,
         type: 'deletable',
       })
       didChange = true
@@ -784,6 +1076,7 @@ const getImportedEditorLayout = (editorValue: unknown) => {
 
   if (!isRecord(editorValue)) {
     return {
+      edgeStyle: DEFAULT_EDGE_STYLE,
       hasEditorSection: false,
       positions,
       viewport: undefined,
@@ -807,6 +1100,7 @@ const getImportedEditorLayout = (editorValue: unknown) => {
   }
 
   return {
+    edgeStyle: getEdgeStyleFromUnknown(editorValue.edgeStyle),
     hasEditorSection: true,
     positions,
     viewport: getViewportFromUnknown(editorValue.viewport),
@@ -939,6 +1233,75 @@ const parseYamlImportText = (yamlText: string) => {
       }
     }
 
+    const parameterUpdates: Array<Omit<DecisionParameterUpdate, 'id'>> = []
+
+    if (stepValue.parameterUpdates !== undefined) {
+      if (!Array.isArray(stepValue.parameterUpdates)) {
+        errors.push(
+          `בשלב ${stepId || stepIndex + 1}, parameterUpdates חייב להיות מערך.`,
+        )
+      } else {
+        stepValue.parameterUpdates.forEach((parameterValue, parameterIndex) => {
+          if (!isRecord(parameterValue)) {
+            errors.push(
+              `בשלב ${stepId || stepIndex + 1}, עדכון פרמטר ${parameterIndex + 1} אינו תקין.`,
+            )
+
+            return
+          }
+
+          parameterUpdates.push({
+            name: getStringValue(parameterValue.name),
+            value: getStringValue(parameterValue.value),
+          })
+        })
+      }
+    }
+
+    const actions: Array<Omit<DecisionAction, 'id'>> = []
+
+    if (stepValue.actions !== undefined) {
+      if (!Array.isArray(stepValue.actions)) {
+        errors.push(`בשלב ${stepId || stepIndex + 1}, actions חייב להיות מערך.`)
+      } else {
+        stepValue.actions.forEach((actionValue, actionIndex) => {
+          if (!isRecord(actionValue)) {
+            errors.push(
+              `בשלב ${stepId || stepIndex + 1}, פעולה ${actionIndex + 1} אינה תקינה.`,
+            )
+
+            return
+          }
+
+          actions.push({
+            name: getStringValue(actionValue.name),
+          })
+        })
+      }
+    }
+
+    const tools: Array<Omit<DecisionTool, 'id'>> = []
+
+    if (stepValue.tools !== undefined) {
+      if (!Array.isArray(stepValue.tools)) {
+        errors.push(`בשלב ${stepId || stepIndex + 1}, tools חייב להיות מערך.`)
+      } else {
+        stepValue.tools.forEach((toolValue, toolIndex) => {
+          if (!isRecord(toolValue)) {
+            errors.push(
+              `בשלב ${stepId || stepIndex + 1}, כלי ${toolIndex + 1} אינו תקין.`,
+            )
+
+            return
+          }
+
+          tools.push({
+            name: getStringValue(toolValue.name),
+          })
+        })
+      }
+    }
+
     const options: ImportedStepOption[] = []
 
     if (stepValue.options !== undefined) {
@@ -984,12 +1347,15 @@ const parseYamlImportText = (yamlText: string) => {
     if (stepId && isDecisionNodeType(stepType) && typeof script === 'string') {
       importedSteps.push({
         id: stepId,
+        actions,
         images,
         links,
         next: getStringValue(stepValue.next),
         nodeType: stepType,
         options,
+        parameterUpdates,
         script,
+        tools,
       })
     }
   })
@@ -1070,6 +1436,20 @@ const parseYamlImportText = (yamlText: string) => {
           ...image,
           id: `image-${imageIndex + 1}`,
         })),
+        parameterUpdates: step.parameterUpdates.map(
+          (parameterUpdate, parameterUpdateIndex) => ({
+            ...parameterUpdate,
+            id: `parameter-${parameterUpdateIndex + 1}`,
+          }),
+        ),
+        actions: step.actions.map((action, actionIndex) => ({
+          ...action,
+          id: `action-${actionIndex + 1}`,
+        })),
+        tools: step.tools.map((tool, toolIndex) => ({
+          ...tool,
+          id: `tool-${toolIndex + 1}`,
+        })),
         links: step.links.map((link, linkIndex) => ({
           ...link,
           id: `link-${linkIndex + 1}`,
@@ -1105,12 +1485,15 @@ const parseYamlImportText = (yamlText: string) => {
 
         return [
           createDecisionEdge(
-            {
-              source: step.id,
-              sourceHandle: `option-${optionIndex + 1}`,
-              target: option.next,
-              targetHandle: null,
-            },
+            getConnectionWithPreferredHandles(
+              {
+                source: step.id,
+                sourceHandle: `option-${optionIndex + 1}`,
+                target: option.next,
+                targetHandle: null,
+              },
+              nodes,
+            ),
             sourceData,
           ),
         ]
@@ -1123,12 +1506,15 @@ const parseYamlImportText = (yamlText: string) => {
 
     return [
       createDecisionEdge(
-        {
-          source: step.id,
-          sourceHandle: DIRECT_SOURCE_HANDLE_ID,
-          target: step.next,
-          targetHandle: null,
-        },
+        getConnectionWithPreferredHandles(
+          {
+            source: step.id,
+            sourceHandle: DIRECT_SOURCE_HANDLE_ID,
+            target: step.next,
+            targetHandle: null,
+          },
+          nodes,
+        ),
         sourceData,
       ),
     ]
@@ -1136,15 +1522,25 @@ const parseYamlImportText = (yamlText: string) => {
   const maxOptionCount = Math.max(0, ...importedSteps.map((step) => step.options.length))
   const maxImageCount = Math.max(0, ...importedSteps.map((step) => step.images.length))
   const maxLinkCount = Math.max(0, ...importedSteps.map((step) => step.links.length))
+  const maxParameterUpdateCount = Math.max(
+    0,
+    ...importedSteps.map((step) => step.parameterUpdates.length),
+  )
+  const maxActionCount = Math.max(0, ...importedSteps.map((step) => step.actions.length))
+  const maxToolCount = Math.max(0, ...importedSteps.map((step) => step.tools.length))
 
   return {
     errors: [],
     flow: {
       edges,
+      nextActionNumber: maxActionCount + 1,
       nextImageNumber: maxImageCount + 1,
       nextLinkNumber: maxLinkCount + 1,
       nextOptionNumber: maxOptionCount + 1,
+      nextParameterUpdateNumber: maxParameterUpdateCount + 1,
+      nextToolNumber: maxToolCount + 1,
       nodes,
+      edgeStyle: importedEditorLayout.edgeStyle,
       scenarioMetadata,
       shouldFitView: !importedEditorLayout.hasEditorSection,
       viewport: importedEditorLayout.viewport,
@@ -1157,12 +1553,14 @@ const buildYamlExport = (
   nodes: DecisionNode[],
   edges: DecisionEdge[],
   viewport: Viewport,
+  edgeStyle: EdgeStyle,
+  includeDraftSection = false,
 ): YamlExport => {
   const exportEdges = scenarioMetadata.entryNodeId
     ? edges.filter((edge) => edge.target !== scenarioMetadata.entryNodeId)
     : edges
 
-  return {
+  const yamlExport: YamlExport = {
     scenario: {
       entryStepId: scenarioMetadata.entryNodeId,
       glassixKnowledgeItemName: scenarioMetadata.glassixKnowledgeItemName,
@@ -1193,6 +1591,25 @@ const buildYamlExport = (
         step.links = nodeData.links.map((link) => ({
           label: link.label,
           itemId: link.itemId,
+        }))
+      }
+
+      if (nodeData.parameterUpdates.length > 0) {
+        step.parameterUpdates = nodeData.parameterUpdates.map((parameterUpdate) => ({
+          name: parameterUpdate.name,
+          value: parameterUpdate.value,
+        }))
+      }
+
+      if (nodeData.actions.length > 0) {
+        step.actions = nodeData.actions.map((action) => ({
+          name: action.name,
+        }))
+      }
+
+      if (nodeData.tools.length > 0) {
+        step.tools = nodeData.tools.map((tool) => ({
+          name: tool.name,
         }))
       }
 
@@ -1229,6 +1646,7 @@ const buildYamlExport = (
       return step
     }),
     _editor: {
+      edgeStyle,
       viewport,
       positions: Object.fromEntries(
         nodes.map((node) => [
@@ -1241,6 +1659,15 @@ const buildYamlExport = (
       ),
     },
   }
+
+  if (includeDraftSection) {
+    yamlExport.draft = {
+      hasValidationIssues: true,
+      exportedWithErrors: true,
+    }
+  }
+
+  return yamlExport
 }
 
 const createYamlExportText = (
@@ -1248,10 +1675,22 @@ const createYamlExportText = (
   nodes: DecisionNode[],
   edges: DecisionEdge[],
   viewport: Viewport,
+  edgeStyle: EdgeStyle,
+  includeDraftSection = false,
 ) =>
-  stringify(buildYamlExport(scenarioMetadata, nodes, edges, viewport), {
-    lineWidth: 0,
-  })
+  stringify(
+    buildYamlExport(
+      scenarioMetadata,
+      nodes,
+      edges,
+      viewport,
+      edgeStyle,
+      includeDraftSection,
+    ),
+    {
+      lineWidth: 0,
+    },
+  )
 
 const sanitizeYamlFileName = (fileName: string) =>
   fileName.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
@@ -1270,11 +1709,17 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
   const scriptText = nodeData.script.trim()
   const [isEditingScript, setIsEditingScript] = useState(false)
   const [scriptDraft, setScriptDraft] = useState(nodeData.script)
+  const [editingOptionId, setEditingOptionId] = useState<string | null>(null)
+  const [optionDraft, setOptionDraft] = useState('')
   const scriptEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  const optionEditorRef = useRef<HTMLInputElement | null>(null)
   const shouldSaveScriptOnBlurRef = useRef(true)
+  const shouldSaveOptionOnBlurRef = useRef(true)
   const canHaveOutgoingHandles = supportsOptions(nodeData.nodeType)
   const hasOptionHandles = canHaveOutgoingHandles && nodeData.options.length > 0
   const hasRegularSourceHandle = canHaveOutgoingHandles && nodeData.options.length === 0
+  const directSourcePosition =
+    nodeData.directSourcePosition === 'bottom' ? Position.Bottom : Position.Left
   const isMultiSelected = nodeData.isMultiSelected ?? selected
   const nodeClassName = [
     'decision-node',
@@ -1288,7 +1733,14 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
 
   useEffect(() => {
     updateNodeInternals(id)
-  }, [nodeData.nodeType, nodeData.options.length, id, updateNodeInternals])
+  }, [
+    nodeData.directSourcePosition,
+    nodeData.isEntryNode,
+    nodeData.nodeType,
+    nodeData.options.length,
+    id,
+    updateNodeInternals,
+  ])
 
   useEffect(() => {
     if (isEditingScript) {
@@ -1296,6 +1748,13 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
       scriptEditorRef.current?.select()
     }
   }, [isEditingScript])
+
+  useEffect(() => {
+    if (editingOptionId !== null) {
+      optionEditorRef.current?.focus()
+      optionEditorRef.current?.select()
+    }
+  }, [editingOptionId])
 
   const startScriptEditing = () => {
     shouldSaveScriptOnBlurRef.current = true
@@ -1312,6 +1771,26 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
     shouldSaveScriptOnBlurRef.current = false
     setScriptDraft(nodeData.script)
     setIsEditingScript(false)
+  }
+
+  const startOptionEditing = (option: DecisionOption) => {
+    shouldSaveOptionOnBlurRef.current = true
+    setEditingOptionId(option.id)
+    setOptionDraft(option.label)
+  }
+
+  const saveOptionEditing = () => {
+    if (editingOptionId !== null) {
+      nodeData.onOptionLabelChange?.(id, editingOptionId, optionDraft)
+    }
+
+    setEditingOptionId(null)
+  }
+
+  const cancelOptionEditing = () => {
+    shouldSaveOptionOnBlurRef.current = false
+    setEditingOptionId(null)
+    setOptionDraft('')
   }
 
   return (
@@ -1339,11 +1818,32 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
         />
       </label>
 
-      <Handle
-        type="target"
-        position={Position.Right}
-        className="decision-node__handle decision-node__target-handle"
-      />
+      <button
+        type="button"
+        className="decision-node__delete-button nodrag nopan"
+        title="מחק שלב"
+        aria-label="מחק שלב"
+        onClick={(event) => {
+          event.stopPropagation()
+          nodeData.onDeleteNode?.(id)
+        }}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        ×
+      </button>
+
+      {!nodeData.isEntryNode
+        ? targetHandleConfigs.map((handleConfig) => (
+            <Handle
+              key={handleConfig.id}
+              type="target"
+              id={handleConfig.id}
+              position={handleConfig.position}
+              className={`decision-node__handle ${handleConfig.className}`}
+            />
+          ))
+        : null}
 
       <div className="decision-node__header">
         <span className="decision-node__id">{id}</span>
@@ -1417,8 +1917,63 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
               ]
                 .filter(Boolean)
                 .join(' ')}
+              onDoubleClick={(event) => {
+                event.stopPropagation()
+                startOptionEditing(option)
+              }}
             >
-              <span>{option.label.trim() || 'אפשרות ללא טקסט'}</span>
+              {editingOptionId === option.id ? (
+                <input
+                  ref={optionEditorRef}
+                  type="text"
+                  value={optionDraft}
+                  dir="rtl"
+                  className="decision-node__option-editor nodrag nopan"
+                  aria-label="עריכת אפשרות תשובה"
+                  onBlur={() => {
+                    if (!shouldSaveOptionOnBlurRef.current) {
+                      shouldSaveOptionOnBlurRef.current = true
+
+                      return
+                    }
+
+                    saveOptionEditing()
+                  }}
+                  onChange={(event) => setOptionDraft(event.currentTarget.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      cancelOptionEditing()
+
+                      return
+                    }
+
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      saveOptionEditing()
+                    }
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+              ) : (
+                <span>{option.label.trim() || 'אפשרות ללא טקסט'}</span>
+              )}
+              <button
+                type="button"
+                className="decision-node__option-delete-button nodrag nopan"
+                title="מחק אפשרות"
+                aria-label="מחק אפשרות"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  nodeData.onDeleteOption?.(id, option.id)
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                ×
+              </button>
               <Handle
                 type="source"
                 id={option.id}
@@ -1434,8 +1989,16 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
         <Handle
           type="source"
           id={DIRECT_SOURCE_HANDLE_ID}
-          position={Position.Left}
-          className="decision-node__handle decision-node__regular-handle"
+          position={directSourcePosition}
+          className={[
+            'decision-node__handle',
+            'decision-node__regular-handle',
+            directSourcePosition === Position.Bottom
+              ? 'decision-node__regular-handle--bottom'
+              : 'decision-node__regular-handle--left',
+          ]
+            .filter(Boolean)
+            .join(' ')}
         />
       ) : null}
 
@@ -1556,7 +2119,9 @@ function DeletableDecisionEdge({
   data,
 }: EdgeProps<DecisionEdge>) {
   const [isHovered, setIsHovered] = useState(false)
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
+  const edgePathFactory =
+    data?.edgeStyle === 'curved' ? getBezierPath : getSmoothStepPath
+  const [edgePath, labelX, labelY] = edgePathFactory({
     sourceX,
     sourceY,
     sourcePosition,
@@ -1633,13 +2198,23 @@ function App() {
   const reactFlowInstanceRef = useRef<ReactFlowInstance<DecisionNode, DecisionEdge> | null>(
     null,
   )
+  const canvasPanelRef = useRef<HTMLElement | null>(null)
+  const connectionStartRef = useRef<{
+    sourceHandle: string
+    sourceId: string
+  } | null>(null)
+  const shouldIgnoreNextPaneClickRef = useRef(false)
   const nextOptionNumber = useRef(1)
   const nextImageNumber = useRef(1)
   const nextLinkNumber = useRef(1)
+  const nextParameterUpdateNumber = useRef(1)
+  const nextActionNumber = useRef(1)
+  const nextToolNumber = useRef(1)
   const [scenarioMetadata, setScenarioMetadata] = useState<ScenarioMetadata>(
     initialScenarioMetadata,
   )
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('pan')
+  const [edgeStyle, setEdgeStyle] = useState<EdgeStyle>(DEFAULT_EDGE_STYLE)
   const [editorViewport, setEditorViewport] = useState<Viewport>(initialViewport)
   const [isScenarioPanelOpen, setIsScenarioPanelOpen] = useState(false)
   const [isYamlImportPanelOpen, setIsYamlImportPanelOpen] = useState(false)
@@ -1652,7 +2227,10 @@ function App() {
   const [yamlImportErrors, setYamlImportErrors] = useState<string[]>([])
   const [yamlImportFileName, setYamlImportFileName] = useState('')
   const [yamlCopyMessage, setYamlCopyMessage] = useState('')
+  const [isDraftExport, setIsDraftExport] = useState(false)
   const [appMessage, setAppMessage] = useState('')
+  const [pendingConnectionPopover, setPendingConnectionPopover] =
+    useState<PendingConnectionPopover | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<DecisionNode>([])
@@ -1691,11 +2269,93 @@ function App() {
   const isSelectionMode = canvasMode === 'select'
   const targetDatalistId = 'step-target-options'
   const generatedYamlText = useMemo(
-    () => createYamlExportText(scenarioMetadata, nodes, edges, editorViewport),
-    [edges, editorViewport, nodes, scenarioMetadata],
+    () =>
+      createYamlExportText(
+        scenarioMetadata,
+        nodes,
+        edges,
+        editorViewport,
+        edgeStyle,
+        isDraftExport,
+      ),
+    [edgeStyle, edges, editorViewport, isDraftExport, nodes, scenarioMetadata],
   )
   const hasValidationErrors = Boolean(validationReport?.errors.length)
   const hasValidationWarnings = Boolean(validationReport?.warnings.length)
+
+  const getCanvasPlacementFromClientPosition = useCallback(
+    (clientPosition: XYPosition) => {
+      const canvasBounds = canvasPanelRef.current?.getBoundingClientRect()
+      const placementMargin = 36
+      const clampedClientPosition = canvasBounds
+        ? {
+            x: clampNumber(
+              clientPosition.x,
+              canvasBounds.left + placementMargin,
+              canvasBounds.right - placementMargin,
+            ),
+            y: clampNumber(
+              clientPosition.y,
+              canvasBounds.top + placementMargin,
+              canvasBounds.bottom - placementMargin,
+            ),
+          }
+        : clientPosition
+      const flowPosition =
+        reactFlowInstanceRef.current?.screenToFlowPosition(clampedClientPosition) ??
+        (canvasBounds
+          ? {
+              x:
+                (clampedClientPosition.x - canvasBounds.left - editorViewport.x) /
+                editorViewport.zoom,
+              y:
+                (clampedClientPosition.y - canvasBounds.top - editorViewport.y) /
+                editorViewport.zoom,
+            }
+          : {
+              x: (clampedClientPosition.x - editorViewport.x) / editorViewport.zoom,
+              y: (clampedClientPosition.y - editorViewport.y) / editorViewport.zoom,
+            })
+
+      return {
+        nodePosition: {
+          x: flowPosition.x - nodeLayoutWidth / 2,
+          y: flowPosition.y - nodeLayoutHeight / 2,
+        },
+        popoverPosition: canvasBounds
+          ? {
+              x: clampNumber(
+                clampedClientPosition.x - canvasBounds.left,
+                126,
+                canvasBounds.width - 126,
+              ),
+              y: clampNumber(
+                clampedClientPosition.y - canvasBounds.top,
+                16,
+                canvasBounds.height - 230,
+              ),
+            }
+          : clampedClientPosition,
+      }
+    },
+    [editorViewport],
+  )
+
+  const getVisibleCanvasCenterPosition = useCallback(() => {
+    const canvasBounds = canvasPanelRef.current?.getBoundingClientRect()
+
+    return getCanvasPlacementFromClientPosition(
+      canvasBounds
+        ? {
+            x: canvasBounds.left + canvasBounds.width / 2,
+            y: canvasBounds.top + canvasBounds.height / 2,
+          }
+        : {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          },
+    ).nodePosition
+  }, [getCanvasPlacementFromClientPosition])
 
   const deleteEdgeById = useCallback(
     (edgeId: string) => {
@@ -1735,6 +2395,62 @@ function App() {
       )
     },
     [setNodes],
+  )
+
+  const updateNodeOption = useCallback(
+    (nodeId: string, optionId: string, label: string) => {
+      setNodes((currentNodes) =>
+        currentNodes.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: {
+                  ...normalizeNodeData(node.data),
+                  options: normalizeNodeData(node.data).options.map((option) =>
+                    option.id === optionId ? { ...option, label } : option,
+                  ),
+                },
+              }
+            : node,
+        ),
+      )
+      setEdges((currentEdges) =>
+        currentEdges.map((edge) =>
+          edge.source === nodeId && edge.sourceHandle === optionId
+            ? { ...edge, label: getOptionEdgeLabel(label) }
+            : edge,
+        ),
+      )
+    },
+    [setEdges, setNodes],
+  )
+
+  const deleteNodeOption = useCallback(
+    (nodeId: string, optionId: string) => {
+      setNodes((currentNodes) =>
+        currentNodes.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: {
+                  ...normalizeNodeData(node.data),
+                  options: normalizeNodeData(node.data).options.filter(
+                    (option) => option.id !== optionId,
+                  ),
+                },
+              }
+            : node,
+        ),
+      )
+      setEdges((currentEdges) =>
+        currentEdges.filter(
+          (edge) => !(edge.source === nodeId && edge.sourceHandle === optionId),
+        ),
+      )
+      setSelectedNodeId(nodeId)
+      setSelectedEdgeId(null)
+    },
+    [setEdges, setNodes],
   )
 
   const addOptionToNode = useCallback(
@@ -1779,15 +2495,53 @@ function App() {
     [setEdges, setNodes],
   )
 
+  const deleteNodeById = useCallback(
+    (nodeId: string) => {
+      const shouldDelete = window.confirm(
+        'למחוק את השלב הזה? כל החיבורים אליו וממנו יימחקו.',
+      )
+
+      if (!shouldDelete) {
+        return
+      }
+
+      setNodes((currentNodes) =>
+        currentNodes.filter((node) => node.id !== nodeId),
+      )
+      setEdges((currentEdges) =>
+        currentEdges.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId,
+        ),
+      )
+      setSelectedNodeId((currentSelectedNodeId) =>
+        currentSelectedNodeId === nodeId ? null : currentSelectedNodeId,
+      )
+      setSelectedEdgeId(null)
+
+      if (scenarioMetadata.entryNodeId === nodeId) {
+        setScenarioMetadata((currentMetadata) => ({
+          ...currentMetadata,
+          entryNodeId: '',
+        }))
+        setAppMessage('שלב הפתיחה נמחק. יש לבחור שלב פתיחה חדש.')
+      }
+    },
+    [scenarioMetadata.entryNodeId, setEdges, setNodes],
+  )
+
   const displayNodes = useMemo<DecisionNode[]>(
     () =>
       nodes.map((node) => {
         const nodeData = normalizeNodeData(node.data)
         const commonNodeData = {
           ...nodeData,
+          directSourcePosition: getDirectSourcePositionForNode(node, nodes, edges),
           isEntryNode: node.id === scenarioMetadata.entryNodeId,
           isMultiSelected: Boolean(node.selected),
           onAddOption: addOptionToNode,
+          onDeleteNode: deleteNodeById,
+          onDeleteOption: deleteNodeOption,
+          onOptionLabelChange: updateNodeOption,
           onScriptChange: updateNodeScript,
           onToggleMultiSelect: toggleNodeMultiSelection,
         }
@@ -1822,10 +2576,14 @@ function App() {
       }),
     [
       addOptionToNode,
+      deleteNodeById,
+      deleteNodeOption,
+      edges,
       nodes,
       scenarioMetadata.entryNodeId,
       selectedEdge,
       toggleNodeMultiSelection,
+      updateNodeOption,
       updateNodeScript,
     ],
   )
@@ -1858,11 +2616,12 @@ function App() {
           type: 'deletable',
           data: {
             ...(edge.data ?? {}),
+            edgeStyle,
             onDelete: deleteEdgeById,
           },
         }
       }),
-    [activeSelectedEdgeId, deleteEdgeById, edges],
+    [activeSelectedEdgeId, deleteEdgeById, edgeStyle, edges],
   )
 
   useEffect(() => {
@@ -1886,6 +2645,28 @@ function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [nodes.length])
 
+  useEffect(() => {
+    if (!pendingConnectionPopover) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('.connection-create-popover')
+      ) {
+        return
+      }
+
+      shouldIgnoreNextPaneClickRef.current = false
+      setPendingConnectionPopover(null)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [pendingConnectionPopover])
+
   const updateScenarioMetadata = useCallback(
     (metadataPatch: Partial<ScenarioMetadata>) => {
       setScenarioMetadata((currentMetadata) => ({
@@ -1907,6 +2688,7 @@ function App() {
     (importedFlow: ImportedFlow) => {
       setNodes(importedFlow.nodes)
       setEdges(importedFlow.edges)
+      setEdgeStyle(importedFlow.edgeStyle)
       setScenarioMetadata(importedFlow.scenarioMetadata)
       setSelectedNodeId(null)
       setSelectedEdgeId(null)
@@ -1917,11 +2699,17 @@ function App() {
       setYamlImportText('')
       setYamlImportErrors([])
       setYamlImportFileName('')
+      setYamlCopyMessage('')
+      setIsDraftExport(false)
+      setPendingConnectionPopover(null)
       setAppMessage('התסריט יובא בהצלחה')
 
       nextOptionNumber.current = importedFlow.nextOptionNumber
       nextImageNumber.current = importedFlow.nextImageNumber
       nextLinkNumber.current = importedFlow.nextLinkNumber
+      nextParameterUpdateNumber.current = importedFlow.nextParameterUpdateNumber
+      nextActionNumber.current = importedFlow.nextActionNumber
+      nextToolNumber.current = importedFlow.nextToolNumber
 
       window.requestAnimationFrame(() => {
         if (importedFlow.viewport) {
@@ -2004,27 +2792,35 @@ function App() {
     setIsYamlExportPanelOpen(false)
     setIsYamlImportPanelOpen(false)
     setYamlCopyMessage('')
+    setIsDraftExport(false)
+    setPendingConnectionPopover(null)
     setYamlImportErrors([])
     setYamlImportFileName('')
     setYamlImportText('')
     setAppMessage('נוצר תסריט חדש. יש לייצא YAML כדי לשמור את העבודה.')
+    setEdgeStyle(DEFAULT_EDGE_STYLE)
     setEditorViewport(initialViewport)
 
     nextOptionNumber.current = 1
     nextImageNumber.current = 1
     nextLinkNumber.current = 1
+    nextParameterUpdateNumber.current = 1
+    nextActionNumber.current = 1
+    nextToolNumber.current = 1
 
     void reactFlowInstanceRef.current?.setViewport(initialViewport, { duration: 250 })
   }, [edges.length, nodes.length, setEdges, setNodes])
 
-  const openYamlExportPanelWithoutValidation = useCallback(() => {
+  const openYamlExportPanelWithoutValidation = useCallback((exportAsDraft = false) => {
     setYamlCopyMessage('')
+    setIsDraftExport(exportAsDraft)
     setValidationReport(null)
     setIsValidationPanelOpen(false)
     setIsYamlExportPanelOpen(true)
   }, [])
 
   const openYamlExportPanel = useCallback(() => {
+    setIsDraftExport(false)
     const nextValidationReport = validateFlowForYamlExport(
       scenarioMetadata,
       nodes,
@@ -2046,7 +2842,11 @@ function App() {
   }, [edges, nodes, openYamlExportPanelWithoutValidation, scenarioMetadata])
 
   const continueYamlExportAfterWarnings = useCallback(() => {
-    openYamlExportPanelWithoutValidation()
+    openYamlExportPanelWithoutValidation(false)
+  }, [openYamlExportPanelWithoutValidation])
+
+  const continueYamlExportAsDraft = useCallback(() => {
+    openYamlExportPanelWithoutValidation(true)
   }, [openYamlExportPanelWithoutValidation])
 
   const focusValidationStep = useCallback(
@@ -2199,42 +2999,20 @@ function App() {
 
   const updateSelectedNodeOption = useCallback(
     (optionId: string, label: string) => {
-      updateSelectedNodeDataBy((nodeData) => ({
-        ...nodeData,
-        options: nodeData.options.map((option) =>
-          option.id === optionId ? { ...option, label } : option,
-        ),
-      }))
-
       if (selectedNodeId !== null) {
-        setEdges((currentEdges) =>
-          currentEdges.map((edge) =>
-            edge.source === selectedNodeId && edge.sourceHandle === optionId
-              ? { ...edge, label: getOptionEdgeLabel(label) }
-              : edge,
-          ),
-        )
+        updateNodeOption(selectedNodeId, optionId, label)
       }
     },
-    [selectedNodeId, setEdges, updateSelectedNodeDataBy],
+    [selectedNodeId, updateNodeOption],
   )
 
   const deleteSelectedNodeOption = useCallback(
     (optionId: string) => {
-      updateSelectedNodeDataBy((nodeData) => ({
-        ...nodeData,
-        options: nodeData.options.filter((option) => option.id !== optionId),
-      }))
-
       if (selectedNodeId !== null) {
-        setEdges((currentEdges) =>
-          currentEdges.filter(
-            (edge) => !(edge.source === selectedNodeId && edge.sourceHandle === optionId),
-          ),
-        )
+        deleteNodeOption(selectedNodeId, optionId)
       }
     },
-    [selectedNodeId, setEdges, updateSelectedNodeDataBy],
+    [deleteNodeOption, selectedNodeId],
   )
 
   const addSelectedNodeImage = useCallback(() => {
@@ -2317,6 +3095,131 @@ function App() {
     [updateSelectedNodeDataBy],
   )
 
+  const addSelectedNodeParameterUpdate = useCallback(() => {
+    if (selectedNodeId === null) {
+      return
+    }
+
+    const newParameterUpdate: DecisionParameterUpdate = {
+      id: `parameter-${nextParameterUpdateNumber.current}`,
+      name: '',
+      value: '',
+    }
+    nextParameterUpdateNumber.current += 1
+
+    updateSelectedNodeDataBy((nodeData) => ({
+      ...nodeData,
+      parameterUpdates: [...nodeData.parameterUpdates, newParameterUpdate],
+    }))
+  }, [selectedNodeId, updateSelectedNodeDataBy])
+
+  const updateSelectedNodeParameterUpdate = useCallback(
+    (
+      parameterUpdateId: string,
+      parameterUpdatePatch: Partial<DecisionParameterUpdate>,
+    ) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        parameterUpdates: nodeData.parameterUpdates.map((parameterUpdate) =>
+          parameterUpdate.id === parameterUpdateId
+            ? { ...parameterUpdate, ...parameterUpdatePatch }
+            : parameterUpdate,
+        ),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
+  const deleteSelectedNodeParameterUpdate = useCallback(
+    (parameterUpdateId: string) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        parameterUpdates: nodeData.parameterUpdates.filter(
+          (parameterUpdate) => parameterUpdate.id !== parameterUpdateId,
+        ),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
+  const addSelectedNodeAction = useCallback(() => {
+    if (selectedNodeId === null) {
+      return
+    }
+
+    const newAction: DecisionAction = {
+      id: `action-${nextActionNumber.current}`,
+      name: '',
+    }
+    nextActionNumber.current += 1
+
+    updateSelectedNodeDataBy((nodeData) => ({
+      ...nodeData,
+      actions: [...nodeData.actions, newAction],
+    }))
+  }, [selectedNodeId, updateSelectedNodeDataBy])
+
+  const updateSelectedNodeAction = useCallback(
+    (actionId: string, actionPatch: Partial<DecisionAction>) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        actions: nodeData.actions.map((action) =>
+          action.id === actionId ? { ...action, ...actionPatch } : action,
+        ),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
+  const deleteSelectedNodeAction = useCallback(
+    (actionId: string) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        actions: nodeData.actions.filter((action) => action.id !== actionId),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
+  const addSelectedNodeTool = useCallback(() => {
+    if (selectedNodeId === null) {
+      return
+    }
+
+    const newTool: DecisionTool = {
+      id: `tool-${nextToolNumber.current}`,
+      name: '',
+    }
+    nextToolNumber.current += 1
+
+    updateSelectedNodeDataBy((nodeData) => ({
+      ...nodeData,
+      tools: [...nodeData.tools, newTool],
+    }))
+  }, [selectedNodeId, updateSelectedNodeDataBy])
+
+  const updateSelectedNodeTool = useCallback(
+    (toolId: string, toolPatch: Partial<DecisionTool>) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        tools: nodeData.tools.map((tool) =>
+          tool.id === toolId ? { ...tool, ...toolPatch } : tool,
+        ),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
+  const deleteSelectedNodeTool = useCallback(
+    (toolId: string) => {
+      updateSelectedNodeDataBy((nodeData) => ({
+        ...nodeData,
+        tools: nodeData.tools.filter((tool) => tool.id !== toolId),
+      }))
+    },
+    [updateSelectedNodeDataBy],
+  )
+
   const isValidConnection = useCallback<IsValidConnection>(
     (connection) =>
       isDecisionConnectionValid(
@@ -2353,7 +3256,11 @@ function App() {
           return currentEdges
         }
 
-        const newEdge = createDecisionEdge(connection, sourceData)
+        const preferredConnection = getConnectionWithPreferredHandles(
+          connection,
+          nodes,
+        )
+        const newEdge = createDecisionEdge(preferredConnection, sourceData)
 
         return addEdge(newEdge, currentEdges)
       })
@@ -2400,7 +3307,15 @@ function App() {
           return currentEdges
         }
 
-        return addEdge(createDecisionEdge(connection, sourceData), edgesWithoutHandle)
+        const preferredConnection = getConnectionWithPreferredHandles(
+          connection,
+          nodes,
+        )
+
+        return addEdge(
+          createDecisionEdge(preferredConnection, sourceData),
+          edgesWithoutHandle,
+        )
       })
     },
     [nodes, scenarioMetadata.entryNodeId, setEdges],
@@ -2423,35 +3338,8 @@ function App() {
       return
     }
 
-    const shouldDelete = window.confirm(
-      'למחוק את השלב הזה? כל החיבורים אליו וממנו יימחקו.',
-    )
-
-    if (!shouldDelete) {
-      return
-    }
-
-    const deletedNodeId = selectedNode.id
-
-    setNodes((currentNodes) =>
-      currentNodes.filter((node) => node.id !== deletedNodeId),
-    )
-    setEdges((currentEdges) =>
-      currentEdges.filter(
-        (edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId,
-      ),
-    )
-    setSelectedNodeId(null)
-    setSelectedEdgeId(null)
-
-    if (scenarioMetadata.entryNodeId === deletedNodeId) {
-      setScenarioMetadata((currentMetadata) => ({
-        ...currentMetadata,
-        entryNodeId: '',
-      }))
-      setAppMessage('שלב הפתיחה נמחק. יש לבחור שלב פתיחה חדש.')
-    }
-  }, [scenarioMetadata.entryNodeId, selectedNode, setEdges, setNodes])
+    deleteNodeById(selectedNode.id)
+  }, [deleteNodeById, selectedNode])
 
   const clearNodeSelection = useCallback(() => {
     setNodes((currentNodes) =>
@@ -2542,6 +3430,33 @@ function App() {
             id: linkId,
           }
         })
+        const parameterUpdates = nodeData.parameterUpdates.map((parameterUpdate) => {
+          const parameterUpdateId = `parameter-${nextParameterUpdateNumber.current}`
+          nextParameterUpdateNumber.current += 1
+
+          return {
+            ...parameterUpdate,
+            id: parameterUpdateId,
+          }
+        })
+        const actions = nodeData.actions.map((action) => {
+          const actionId = `action-${nextActionNumber.current}`
+          nextActionNumber.current += 1
+
+          return {
+            ...action,
+            id: actionId,
+          }
+        })
+        const tools = nodeData.tools.map((tool) => {
+          const toolId = `tool-${nextToolNumber.current}`
+          nextToolNumber.current += 1
+
+          return {
+            ...tool,
+            id: toolId,
+          }
+        })
 
         nodeIdMap.set(node.id, nextNodeId)
         reservedNodeIds.add(nextNodeId)
@@ -2561,6 +3476,9 @@ function App() {
             options,
             images,
             links,
+            parameterUpdates,
+            actions,
+            tools,
           },
         }
       })
@@ -2593,12 +3511,15 @@ function App() {
 
       return [
         createDecisionEdge(
-          {
-            source: copiedSourceId,
-            sourceHandle: copiedSourceHandle,
-            target: copiedTargetId,
-            targetHandle: edge.targetHandle ?? null,
-          },
+          getConnectionWithPreferredHandles(
+            {
+              source: copiedSourceId,
+              sourceHandle: copiedSourceHandle,
+              target: copiedTargetId,
+              targetHandle: edge.targetHandle ?? null,
+            },
+            duplicatedNodes,
+          ),
           copiedSourceData,
         ),
       ]
@@ -2634,28 +3555,162 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [deleteSelectedNode, selectedNode])
 
+  const createConnectedNodeFromPopover = useCallback(
+    (nodeType: DecisionNodeType) => {
+      if (!pendingConnectionPopover) {
+        return
+      }
+
+      shouldIgnoreNextPaneClickRef.current = false
+
+      if (
+        !canCreateOutgoingConnection(
+          pendingConnectionPopover.sourceId,
+          pendingConnectionPopover.sourceHandle,
+          nodes,
+          edges,
+        )
+      ) {
+        setPendingConnectionPopover(null)
+
+        return
+      }
+
+      const id = getNextStepId(nodes.map((node) => node.id))
+      const newNode: DecisionNode = {
+        id,
+        type: 'decision',
+        position: pendingConnectionPopover.nodePosition,
+        selected: true,
+        data: createNodeData(nodeType),
+      }
+      const nextNodes = [
+        ...nodes.map((node) =>
+          node.selected ? { ...node, selected: false } : node,
+        ),
+        newNode,
+      ]
+      const sourceData = getNodeDataById(nodes, pendingConnectionPopover.sourceId)
+      const connection: Connection = {
+        source: pendingConnectionPopover.sourceId,
+        sourceHandle: pendingConnectionPopover.sourceHandle,
+        target: id,
+        targetHandle: null,
+      }
+
+      if (
+        !sourceData ||
+        !isDecisionConnectionValid(
+          connection,
+          nextNodes,
+          edges,
+          scenarioMetadata.entryNodeId,
+        )
+      ) {
+        setPendingConnectionPopover(null)
+
+        return
+      }
+
+      const preferredConnection = getConnectionWithPreferredHandles(
+        connection,
+        nextNodes,
+      )
+
+      setNodes(nextNodes)
+      setEdges(addEdge(createDecisionEdge(preferredConnection, sourceData), edges))
+      setSelectedNodeId(id)
+      setSelectedEdgeId(null)
+      setPendingConnectionPopover(null)
+    },
+    [
+      edges,
+      nodes,
+      pendingConnectionPopover,
+      scenarioMetadata.entryNodeId,
+      setEdges,
+      setNodes,
+    ],
+  )
+
   const addNode = useCallback(
     (nodeType: DecisionNodeType) => {
+      const basePosition = getVisibleCanvasCenterPosition()
+
       setNodes((currentNodes) => {
-        const nodeIndex = currentNodes.length
         const id = getNextStepId(currentNodes.map((node) => node.id))
-        const row = Math.floor(nodeIndex / 3)
-        const column = nodeIndex % 3
+        const offset = (currentNodes.length % 5) * 24
 
         const newNode: DecisionNode = {
           id,
           type: 'decision',
           position: {
-            x: 80 + column * 260,
-            y: 80 + row * 170,
+            x: basePosition.x + offset,
+            y: basePosition.y + offset,
           },
           data: createNodeData(nodeType),
         }
 
         return [...currentNodes, newNode]
       })
+      setPendingConnectionPopover(null)
     },
-    [setNodes],
+    [getVisibleCanvasCenterPosition, setNodes],
+  )
+
+  const handleConnectStart = useCallback<OnConnectStart>((_event, params) => {
+    if (params.handleType !== 'source' || !params.nodeId) {
+      connectionStartRef.current = null
+
+      return
+    }
+
+    connectionStartRef.current = {
+      sourceId: params.nodeId,
+      sourceHandle: params.handleId ?? DIRECT_SOURCE_HANDLE_ID,
+    }
+    setPendingConnectionPopover(null)
+  }, [])
+
+  const handleConnectEnd = useCallback<OnConnectEnd>(
+    (event, connectionState) => {
+      const connectionStart = connectionStartRef.current
+
+      connectionStartRef.current = null
+
+      if (
+        !connectionStart ||
+        connectionState.toNode !== null ||
+        connectionState.toHandle !== null
+      ) {
+        return
+      }
+
+      if (
+        !canCreateOutgoingConnection(
+          connectionStart.sourceId,
+          connectionStart.sourceHandle,
+          nodes,
+          edges,
+        )
+      ) {
+        return
+      }
+
+      const clientPosition = getClientPositionFromEvent(event)
+
+      if (!clientPosition) {
+        return
+      }
+
+      shouldIgnoreNextPaneClickRef.current = true
+      setSelectedEdgeId(null)
+      setPendingConnectionPopover({
+        ...connectionStart,
+        ...getCanvasPlacementFromClientPosition(clientPosition),
+      })
+    },
+    [edges, getCanvasPlacementFromClientPosition, nodes],
   )
 
   return (
@@ -2713,6 +3768,21 @@ function App() {
         </div>
 
         <p className="canvas-mode-toggle__helper">{canvasModeHelperText[canvasMode]}</p>
+
+        <label className="edge-style-toggle">
+          <span>סגנון קווים</span>
+          <select
+            value={edgeStyle}
+            dir="rtl"
+            onChange={(event) => setEdgeStyle(event.currentTarget.value as EdgeStyle)}
+          >
+            {(Object.keys(edgeStyleLabels) as EdgeStyle[]).map((styleKey) => (
+              <option key={styleKey} value={styleKey}>
+                {edgeStyleLabels[styleKey]}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       <div className="workspace-shell">
@@ -2750,53 +3820,63 @@ function App() {
 
           {selectedNode && selectedNodeData ? (
             <div className="properties-panel__form" dir="rtl">
-              <label className="properties-panel__field">
-                <span>מזהה שלב</span>
-                <input
-                  type="text"
-                  value={selectedNode.id}
-                  dir="rtl"
-                  className="properties-panel__control properties-panel__control--code"
-                  onChange={(event) => updateSelectedNodeId(event.currentTarget.value)}
-                />
-              </label>
+              <section className="properties-panel__section" aria-label="פרטי שלב">
+                <h3>פרטי שלב</h3>
+                <div className="properties-panel__section-body">
+                  <label className="properties-panel__field">
+                    <span>מזהה שלב</span>
+                    <input
+                      type="text"
+                      value={selectedNode.id}
+                      dir="rtl"
+                      className="properties-panel__control properties-panel__control--code"
+                      onChange={(event) =>
+                        updateSelectedNodeId(event.currentTarget.value)
+                      }
+                    />
+                  </label>
 
-              <label className="properties-panel__field">
-                <span>סוג שלב</span>
-                <select
-                  value={selectedNodeData.nodeType}
-                  dir="rtl"
-                  className="properties-panel__control"
-                  onChange={(event) =>
-                    updateSelectedNodeData({
-                      nodeType: event.currentTarget.value as DecisionNodeType,
-                    })
-                  }
-                >
-                  {sidebarActions.map((action) => (
-                    <option key={action.nodeType} value={action.nodeType}>
-                      {typeLabels[action.nodeType]}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <label className="properties-panel__field">
+                    <span>סוג שלב</span>
+                    <select
+                      value={selectedNodeData.nodeType}
+                      dir="rtl"
+                      className="properties-panel__control"
+                      onChange={(event) =>
+                        updateSelectedNodeData({
+                          nodeType: event.currentTarget.value as DecisionNodeType,
+                        })
+                      }
+                    >
+                      {sidebarActions.map((action) => (
+                        <option key={action.nodeType} value={action.nodeType}>
+                          {typeLabels[action.nodeType]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <label className="properties-panel__field">
-                <span>טקסט לנציג</span>
-                <textarea
-                  value={selectedNodeData.script}
-                  dir="rtl"
-                  rows={5}
-                  className="properties-panel__control properties-panel__textarea"
-                  onChange={(event) =>
-                    updateSelectedNodeData({ script: event.currentTarget.value })
-                  }
-                />
-              </label>
+                  <label className="properties-panel__field">
+                    <span>טקסט לנציג</span>
+                    <textarea
+                      value={selectedNodeData.script}
+                      dir="rtl"
+                      rows={5}
+                      className="properties-panel__control properties-panel__textarea"
+                      onChange={(event) =>
+                        updateSelectedNodeData({ script: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                </div>
+              </section>
 
               {supportsOptions(selectedNodeData.nodeType) ? (
-                <section className="collection-editor" aria-label="אפשרויות תשובה">
-                  <div className="collection-editor__header">
+                <section
+                  className="properties-panel__section"
+                  aria-label="אפשרויות תשובה"
+                >
+                  <div className="properties-panel__section-header">
                     <h3>אפשרויות תשובה</h3>
                     <button
                       type="button"
@@ -2807,7 +3887,7 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="collection-editor__list">
+                  <div className="collection-editor__list properties-panel__section-body">
                     {selectedNodeData.options.map((option, optionIndex) => (
                       <div key={option.id} className="collection-editor__row">
                         <div className="collection-editor__fields">
@@ -2850,32 +3930,200 @@ function App() {
                     {selectedNodeData.options.length === 0 ? (
                       <p className="collection-editor__empty">אין אפשרויות עדיין</p>
                     ) : null}
+
+                    {selectedNodeData.options.length === 0 ? (
+                      <section className="target-editor" aria-label="שלב הבא">
+                        <h4>שלב הבא</h4>
+                        <StepTargetInput
+                          label="שלב הבא"
+                          value={getSelectedNodeTargetForHandle(DIRECT_SOURCE_HANDLE_ID)}
+                          datalistId={targetDatalistId}
+                          candidateNodeIds={targetCandidateNodeIds}
+                          onTargetChange={(targetId) =>
+                            setOutgoingTarget(
+                              selectedNode.id,
+                              DIRECT_SOURCE_HANDLE_ID,
+                              targetId,
+                            )
+                          }
+                        />
+                      </section>
+                    ) : null}
                   </div>
                 </section>
               ) : null}
 
-              {selectedNodeData.nodeType !== 'end' &&
-              selectedNodeData.options.length === 0 ? (
-                <section className="target-editor" aria-label="שלב הבא">
-                  <h3>שלב הבא</h3>
-                  <StepTargetInput
-                    label="שלב הבא"
-                    value={getSelectedNodeTargetForHandle(DIRECT_SOURCE_HANDLE_ID)}
-                    datalistId={targetDatalistId}
-                    candidateNodeIds={targetCandidateNodeIds}
-                    onTargetChange={(targetId) =>
-                      setOutgoingTarget(
-                        selectedNode.id,
-                        DIRECT_SOURCE_HANDLE_ID,
-                        targetId,
-                      )
-                    }
-                  />
-                </section>
-              ) : null}
+              <section
+                className="properties-panel__section"
+                aria-label="עדכון פרמטרים"
+              >
+                <div className="properties-panel__section-header">
+                  <h3>עדכון פרמטרים</h3>
+                  <button
+                    type="button"
+                    className="collection-editor__add-button"
+                    onClick={addSelectedNodeParameterUpdate}
+                  >
+                    הוסף פרמטר
+                  </button>
+                </div>
 
-              <section className="collection-editor" aria-label="תמונות">
-                <div className="collection-editor__header">
+                <div className="collection-editor__list properties-panel__section-body">
+                  {selectedNodeData.parameterUpdates.map(
+                    (parameterUpdate, parameterUpdateIndex) => (
+                    <div key={parameterUpdate.id} className="collection-editor__row">
+                      <div className="collection-editor__fields">
+                        <label className="collection-editor__field">
+                          <span>{`פרמטר ${parameterUpdateIndex + 1}: שם פרמטר`}</span>
+                          <input
+                            type="text"
+                            value={parameterUpdate.name}
+                            dir="rtl"
+                            className="properties-panel__control"
+                            onChange={(event) =>
+                              updateSelectedNodeParameterUpdate(parameterUpdate.id, {
+                                name: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+
+                        <label className="collection-editor__field">
+                          <span>ערך פרמטר</span>
+                          <input
+                            type="text"
+                            value={parameterUpdate.value}
+                            dir="rtl"
+                            className="properties-panel__control"
+                            onChange={(event) =>
+                              updateSelectedNodeParameterUpdate(parameterUpdate.id, {
+                                value: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="collection-editor__delete-button"
+                        onClick={() =>
+                          deleteSelectedNodeParameterUpdate(parameterUpdate.id)
+                        }
+                      >
+                        מחק
+                      </button>
+                    </div>
+                    ),
+                  )}
+
+                  {selectedNodeData.parameterUpdates.length === 0 ? (
+                    <p className="collection-editor__empty">אין עדכוני פרמטרים עדיין</p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section
+                className="properties-panel__section"
+                aria-label="יציאה ל-ACTION"
+              >
+                <div className="properties-panel__section-header">
+                  <h3>יציאה ל-ACTION</h3>
+                  <button
+                    type="button"
+                    className="collection-editor__add-button"
+                    onClick={addSelectedNodeAction}
+                  >
+                    הוסף ACTION
+                  </button>
+                </div>
+
+                <div className="collection-editor__list properties-panel__section-body">
+                  {selectedNodeData.actions.map((action, actionIndex) => (
+                    <div key={action.id} className="collection-editor__row">
+                      <div className="collection-editor__fields">
+                        <label className="collection-editor__field">
+                          <span>{`ACTION ${actionIndex + 1}: שם פעולה`}</span>
+                          <input
+                            type="text"
+                            value={action.name}
+                            dir="rtl"
+                            className="properties-panel__control"
+                            onChange={(event) =>
+                              updateSelectedNodeAction(action.id, {
+                                name: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="collection-editor__delete-button"
+                        onClick={() => deleteSelectedNodeAction(action.id)}
+                      >
+                        מחק
+                      </button>
+                    </div>
+                  ))}
+
+                  {selectedNodeData.actions.length === 0 ? (
+                    <p className="collection-editor__empty">אין פעולות עדיין</p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="properties-panel__section" aria-label="יציאה לכלי">
+                <div className="properties-panel__section-header">
+                  <h3>יציאה לכלי</h3>
+                  <button
+                    type="button"
+                    className="collection-editor__add-button"
+                    onClick={addSelectedNodeTool}
+                  >
+                    הוסף כלי
+                  </button>
+                </div>
+
+                <div className="collection-editor__list properties-panel__section-body">
+                  {selectedNodeData.tools.map((tool, toolIndex) => (
+                    <div key={tool.id} className="collection-editor__row">
+                      <div className="collection-editor__fields">
+                        <label className="collection-editor__field">
+                          <span>{`כלי ${toolIndex + 1}: שם כלי`}</span>
+                          <input
+                            type="text"
+                            value={tool.name}
+                            dir="rtl"
+                            className="properties-panel__control"
+                            onChange={(event) =>
+                              updateSelectedNodeTool(tool.id, {
+                                name: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="collection-editor__delete-button"
+                        onClick={() => deleteSelectedNodeTool(tool.id)}
+                      >
+                        מחק
+                      </button>
+                    </div>
+                  ))}
+
+                  {selectedNodeData.tools.length === 0 ? (
+                    <p className="collection-editor__empty">אין כלים עדיין</p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="properties-panel__section" aria-label="תמונות">
+                <div className="properties-panel__section-header">
                   <h3>תמונות</h3>
                   <button
                     type="button"
@@ -2886,7 +4134,7 @@ function App() {
                   </button>
                 </div>
 
-                <div className="collection-editor__list">
+                <div className="collection-editor__list properties-panel__section-body">
                   {selectedNodeData.images.map((image, imageIndex) => (
                     <div key={image.id} className="collection-editor__row">
                       <div className="collection-editor__fields">
@@ -2937,8 +4185,8 @@ function App() {
                 </div>
               </section>
 
-              <section className="collection-editor" aria-label="קישורי מידע">
-                <div className="collection-editor__header">
+              <section className="properties-panel__section" aria-label="קישורי מידע">
+                <div className="properties-panel__section-header">
                   <h3>קישורי מידע</h3>
                   <button
                     type="button"
@@ -2949,7 +4197,7 @@ function App() {
                   </button>
                 </div>
 
-                <div className="collection-editor__list">
+                <div className="collection-editor__list properties-panel__section-body">
                   {selectedNodeData.links.map((link, linkIndex) => (
                     <div key={link.id} className="collection-editor__row">
                       <div className="collection-editor__fields">
@@ -3000,13 +4248,16 @@ function App() {
                 </div>
               </section>
 
-              <button
-                type="button"
-                className="delete-step-button"
-                onClick={deleteSelectedNode}
-              >
-                מחק שלב
-              </button>
+              <section className="properties-panel__section" aria-label="פעולות שלב">
+                <h3>פעולות שלב</h3>
+                <button
+                  type="button"
+                  className="delete-step-button"
+                  onClick={deleteSelectedNode}
+                >
+                  מחק שלב
+                </button>
+              </section>
             </div>
           ) : (
             <p className="properties-panel__empty">אין שלב נבחר</p>
@@ -3014,7 +4265,11 @@ function App() {
         </section>
         </aside>
 
-        <section className="canvas-panel" aria-label="קנבס עץ ההחלטות">
+        <section
+          ref={canvasPanelRef}
+          className="canvas-panel"
+          aria-label="קנבס עץ ההחלטות"
+        >
         <ReactFlow<DecisionNode, DecisionEdge>
           nodes={displayNodes}
           edges={displayEdges}
@@ -3023,6 +4278,8 @@ function App() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={handleConnect}
+          onConnectStart={handleConnectStart}
+          onConnectEnd={handleConnectEnd}
           onInit={(reactFlowInstance) => {
             reactFlowInstanceRef.current = reactFlowInstance
             setEditorViewport(reactFlowInstance.getViewport())
@@ -3031,8 +4288,15 @@ function App() {
           onNodeClick={handleNodeClick}
           onEdgeClick={handleEdgeClick}
           onPaneClick={() => {
+            if (shouldIgnoreNextPaneClickRef.current) {
+              shouldIgnoreNextPaneClickRef.current = false
+
+              return
+            }
+
             setSelectedNodeId(null)
             setSelectedEdgeId(null)
+            setPendingConnectionPopover(null)
           }}
           isValidConnection={isValidConnection}
           edgesReconnectable={false}
@@ -3049,6 +4313,42 @@ function App() {
           <Background color="#c7d2fe" gap={28} variant={BackgroundVariant.Dots} />
           <Controls position="bottom-left" />
         </ReactFlow>
+
+        {pendingConnectionPopover ? (
+          <div
+            className="connection-create-popover"
+            dir="rtl"
+            style={{
+              right: 'auto',
+              top: pendingConnectionPopover.popoverPosition.y,
+              left: pendingConnectionPopover.popoverPosition.x,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <strong>צור שלב מחובר</strong>
+            <div className="connection-create-popover__actions">
+              {sidebarActions.map((action) => (
+                <button
+                  key={action.nodeType}
+                  type="button"
+                  onClick={() => createConnectedNodeFromPopover(action.nodeType)}
+                >
+                  {typeLabels[action.nodeType]}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="connection-create-popover__cancel"
+                onClick={() => {
+                  shouldIgnoreNextPaneClickRef.current = false
+                  setPendingConnectionPopover(null)
+                }}
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {selectedNodeCount > 0 ? (
           <div className="bulk-actions-toolbar" dir="rtl" aria-label="פעולות על בחירה">
@@ -3306,6 +4606,11 @@ function App() {
             </div>
 
             <div className="validation-panel__actions">
+              {hasValidationErrors ? (
+                <button type="button" onClick={continueYamlExportAsDraft}>
+                  ייצא כטיוטה למרות השגיאות
+                </button>
+              ) : null}
               {!hasValidationErrors && hasValidationWarnings ? (
                 <button type="button" onClick={continueYamlExportAfterWarnings}>
                   ייצא בכל זאת

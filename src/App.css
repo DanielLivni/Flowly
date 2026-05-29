@@ -7,6 +7,16 @@
   overflow: hidden;
   background: #eef2f7;
   color: #172033;
+  font-family: var(--app-font-family);
+}
+
+.app-shell button,
+.app-shell input,
+.app-shell textarea,
+.app-shell select,
+.react-flow,
+.react-flow__edge-text {
+  font-family: var(--app-font-family);
 }
 
 .top-toolbar {
@@ -92,6 +102,33 @@
   color: #64748b;
   font-size: 0.9rem;
   font-weight: 800;
+}
+
+.edge-style-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.edge-style-toggle select {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.edge-style-toggle select:focus {
+  border-color: #2563eb;
+  outline: 3px solid rgba(37, 99, 235, 0.18);
 }
 
 .workspace-shell {
@@ -199,6 +236,34 @@
   gap: 14px;
 }
 
+.properties-panel__section {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.properties-panel__section h3 {
+  margin: 0;
+  color: #101827;
+  font-size: 0.98rem;
+  line-height: 1.25;
+}
+
+.properties-panel__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.properties-panel__section-body {
+  display: grid;
+  gap: 12px;
+}
+
 .properties-panel__field {
   display: grid;
   gap: 7px;
@@ -221,7 +286,7 @@
 }
 
 .properties-panel__control--code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-family);
   text-align: left;
 }
 
@@ -356,7 +421,8 @@
   padding-top: 4px;
 }
 
-.target-editor h3 {
+.target-editor h3,
+.target-editor h4 {
   margin: 0;
   color: #101827;
   font-size: 1rem;
@@ -424,7 +490,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #b42318;
-  font: 900 17px/1 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font: 900 17px/1 var(--app-font-family);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -488,8 +554,8 @@
 
 .decision-node__select-control {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: -13px;
+  right: 12px;
   z-index: 3;
   display: grid;
   width: 22px;
@@ -501,15 +567,18 @@
   opacity: 0;
   cursor: pointer;
   box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+  transform: scale(0.94);
   transition:
     opacity 120ms ease,
     border-color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    transform 120ms ease;
 }
 
 .decision-node:hover .decision-node__select-control,
 .decision-node--multi-selected .decision-node__select-control {
   opacity: 1;
+  transform: scale(1);
 }
 
 .decision-node__select-control:hover {
@@ -525,6 +594,45 @@
   cursor: pointer;
 }
 
+.decision-node__delete-button {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  z-index: 3;
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #b42318;
+  font: 900 17px/1 var(--app-font-family);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+  transform: translateX(-50%) scale(0.94);
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.decision-node:hover .decision-node__delete-button,
+.decision-node__delete-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) scale(1);
+}
+
+.decision-node__delete-button:hover {
+  border-color: #ef4444;
+  background: #fff1f2;
+  transform: translateX(-50%) scale(1.04);
+}
+
 .decision-node__handle {
   width: 11px;
   height: 11px;
@@ -532,12 +640,28 @@
   background: #2563eb;
 }
 
-.decision-node__target-handle {
+.decision-node__target-handle--top {
+  top: -7px;
+}
+
+.decision-node__target-handle--right {
   right: -7px;
 }
 
-.decision-node__regular-handle {
+.decision-node__target-handle--bottom {
+  bottom: -7px;
+}
+
+.decision-node__target-handle--left {
   left: -7px;
+}
+
+.decision-node__regular-handle--left {
+  left: -7px;
+}
+
+.decision-node__regular-handle--bottom {
+  bottom: -7px;
 }
 
 .decision-node__header {
@@ -550,7 +674,7 @@
 
 .decision-node__id {
   color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-font-family);
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0;
@@ -639,7 +763,7 @@
 .decision-node__option-row {
   position: relative;
   min-height: 34px;
-  padding: 7px 10px;
+  padding: 7px 34px 7px 10px;
   border: 1px solid #d7dee9;
   border-radius: 7px;
   background: #f8fafc;
@@ -647,6 +771,58 @@
   font-size: 0.88rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.decision-node__option-editor {
+  width: 100%;
+  min-height: 26px;
+  padding: 4px 6px;
+  border: 1px solid #93c5fd;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+  text-align: right;
+}
+
+.decision-node__option-editor:focus {
+  border-color: #2563eb;
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+}
+
+.decision-node__option-delete-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 2;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #b42318;
+  font: 900 14px/1 var(--app-font-family);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.decision-node__option-row:hover .decision-node__option-delete-button,
+.decision-node__option-delete-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.decision-node__option-delete-button:hover {
+  border-color: #ef4444;
+  background: #fff1f2;
 }
 
 .decision-node__option-row--selected {
@@ -673,7 +849,7 @@
   border-radius: 999px;
   background: #ffffff;
   color: #173d9a;
-  font: 900 20px/1 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font: 900 20px/1 var(--app-font-family);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -701,6 +877,56 @@
 .decision-node__quick-add-option:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.24);
   outline-offset: 2px;
+}
+
+.connection-create-popover {
+  position: absolute;
+  z-index: 12;
+  display: grid;
+  gap: 10px;
+  width: min(220px, calc(100% - 32px));
+  padding: 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+  transform: translate(-50%, 12px);
+}
+
+.connection-create-popover strong {
+  color: #101827;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.connection-create-popover__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.connection-create-popover button {
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.connection-create-popover button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
+.connection-create-popover .connection-create-popover__cancel {
+  grid-column: 1 / -1;
+  color: #42526b;
 }
 
 .bulk-actions-toolbar {
@@ -930,7 +1156,7 @@
   min-height: 260px;
   background: #0f172a;
   color: #e2e8f0;
-  font: 500 0.88rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 500 0.88rem/1.55 var(--app-font-family);
   resize: vertical;
   text-align: left;
 }
@@ -1144,7 +1370,7 @@
   border-radius: 8px;
   background: #0f172a;
   color: #e2e8f0;
-  font: 500 0.88rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 500 0.88rem/1.55 var(--app-font-family);
   text-align: left;
   resize: none;
   white-space: pre;

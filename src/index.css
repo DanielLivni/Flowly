@@ -1,10 +1,12 @@
 :root {
-  font-family:
+  --app-font-family:
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
-    'Segoe UI',
+    "Segoe UI",
+    Arial,
     sans-serif;
+  font-family: var(--app-font-family);
   color: #172033;
   background: #eef2f7;
   font-synthesis: none;
@@ -25,6 +27,7 @@ body {
   min-width: 320px;
   min-height: 100svh;
   margin: 0;
+  font-family: var(--app-font-family);
 }
 
 button,
