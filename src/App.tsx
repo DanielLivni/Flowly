@@ -1010,7 +1010,7 @@ const validateFlowForYamlExport = (
   })
 
   if (!scenarioMetadata.searchoItemUrl.trim()) {
-    addWarning('קישור לפריט בסרצ׳ו ריק.')
+    addWarning('קישור לפריט במאגר המידע ריק.')
   }
 
   if (!scenarioMetadata.scenarioDescription.trim()) {
@@ -4417,7 +4417,7 @@ function App() {
               </label>
 
               <label className="scenario-panel__field">
-                <span>שם פריט במאגר הידע בגלסיקס</span>
+                <span>שם פריט במאגר הידע במערכת הצ'אט</span>
                 <input
                   type="text"
                   value={scenarioMetadata.glassixKnowledgeItemName}
@@ -4431,7 +4431,7 @@ function App() {
               </label>
 
               <label className="scenario-panel__field">
-                <span>שם הפריט בסרצ'ו</span>
+                <span>שם הפריט במאגר המידע</span>
                 <input
                   type="text"
                   value={scenarioMetadata.searchoItemName}
@@ -4445,7 +4445,7 @@ function App() {
               </label>
 
               <label className="scenario-panel__field scenario-panel__field--wide">
-                <span>קישור לפריט בסרצ'ו</span>
+                <span>קישור לפריט במאגר המידע</span>
                 <input
                   type="text"
                   value={scenarioMetadata.searchoItemUrl}
