@@ -34,6 +34,10 @@
 
 .top-toolbar__autosave-notice {
   flex: 0 1 340px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin: 0;
   padding: 8px 10px;
   border: 1px solid #fde68a;
@@ -43,6 +47,28 @@
   font-size: 0.86rem;
   font-weight: 900;
   line-height: 1.35;
+}
+
+.notice-dismiss-button {
+  flex: 0 0 auto;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: 900 17px/1 var(--app-font);
+  cursor: pointer;
+  opacity: 0.72;
+}
+
+.notice-dismiss-button:hover,
+.notice-dismiss-button:focus-visible {
+  border-color: currentColor;
+  background: rgba(255, 255, 255, 0.55);
+  opacity: 1;
 }
 
 .top-toolbar__button {
@@ -175,6 +201,40 @@
   gap: 10px;
 }
 
+.sidebar__add-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar__add-steps-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 900;
+  text-align: right;
+  cursor: pointer;
+}
+
+.sidebar__add-steps--expanded .sidebar__add-steps-toggle {
+  background: #f8fafc;
+  color: #172033;
+}
+
+.sidebar__add-steps-toggle:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
 .sidebar__button {
   width: 100%;
   min-height: 46px;
@@ -207,6 +267,10 @@
 }
 
 .app-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin: 0;
   padding: 12px 14px;
   border: 1px solid #facc15;
@@ -311,6 +375,18 @@
   font-size: 0.92rem;
 }
 
+.properties-panel__hint {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed #c9d3e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .delete-step-button {
   min-height: 42px;
   padding: 9px 12px;
@@ -413,34 +489,6 @@
   background: #f8fafc;
   color: #64748b;
   font-size: 0.88rem;
-}
-
-.target-editor {
-  display: grid;
-  gap: 10px;
-  padding-top: 4px;
-}
-
-.target-editor h3,
-.target-editor h4 {
-  margin: 0;
-  color: #101827;
-  font-size: 1rem;
-  line-height: 1.25;
-}
-
-.target-editor__field {
-  display: grid;
-  gap: 7px;
-  color: #334155;
-  font-size: 0.84rem;
-  font-weight: 800;
-}
-
-.target-editor__field small {
-  color: #64748b;
-  font-size: 0.78rem;
-  font-weight: 700;
 }
 
 .canvas-panel {
@@ -550,6 +598,15 @@
 
 .decision-node--edge-target {
   background: #f0fdfa;
+}
+
+.decision-node--internal {
+  border-color: #88b2a6;
+  background: #f7fbf8;
+}
+
+.decision-node--internal .decision-node__type {
+  color: #0f766e;
 }
 
 .decision-node__select-control {
@@ -699,6 +756,19 @@
   line-height: 1.2;
 }
 
+.decision-node__internal-badge {
+  display: inline-flex;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  background: #ccfbf1;
+  color: #115e59;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
 .decision-node__script,
 .decision-node__placeholder {
   margin: 0;
@@ -750,6 +820,73 @@
   font-size: 0.76rem;
   font-weight: 800;
   line-height: 1.2;
+}
+
+.decision-node__internal-summary {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.decision-node__internal-summary span {
+  padding: 6px 8px;
+  border: 1px solid #cde4dc;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.decision-node__internal-field {
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px;
+  border: 1px solid #cde4dc;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  cursor: text;
+}
+
+.decision-node__internal-field-label {
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.decision-node__internal-field-value {
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.decision-node__internal-field-value--empty {
+  color: #7b8798;
+}
+
+.decision-node__inline-field-editor {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #172033;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: right;
+  box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.decision-node__inline-field-editor:focus {
+  border-color: #2563eb;
+  outline: 3px solid rgba(37, 99, 235, 0.18);
 }
 
 .decision-node__options {
@@ -834,6 +971,32 @@
 
 .decision-node__option-handle {
   left: -22px;
+}
+
+.decision-node__condition-branches {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #cde4dc;
+}
+
+.decision-node__condition-branch {
+  position: relative;
+  min-height: 34px;
+  padding: 7px 12px 7px 10px;
+  border: 1px solid #cde4dc;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #115e59;
+  font-size: 0.86rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.decision-node__condition-handle {
+  left: -22px;
+  background: #0f766e;
 }
 
 .decision-node__quick-add-option {
@@ -983,122 +1146,50 @@
   background: #ffe4e6;
 }
 
-.scenario-panel-backdrop,
-.yaml-import-panel-backdrop,
-.validation-panel-backdrop,
-.yaml-export-panel-backdrop {
+.scenario-panel-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 20;
   display: flex;
   justify-content: flex-start;
-  background: rgba(15, 23, 42, 0.38);
-}
-
-.scenario-panel-backdrop {
-  z-index: 20;
   background: rgba(15, 23, 42, 0.35);
-}
-
-.yaml-import-panel-backdrop,
-.validation-panel-backdrop,
-.yaml-export-panel-backdrop {
-  z-index: 30;
-}
-
-.scenario-panel,
-.yaml-import-panel,
-.validation-panel,
-.yaml-export-panel {
-  height: 100%;
-  padding: 24px;
-  border-left: 1px solid #d5dce8;
-  background: #ffffff;
-  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
 }
 
 .scenario-panel {
   width: min(720px, 100%);
+  height: 100%;
+  padding: 24px;
   overflow-y: auto;
+  border-left: 1px solid #d5dce8;
+  background: #ffffff;
   box-shadow: -16px 0 34px rgba(15, 23, 42, 0.2);
 }
 
-.yaml-import-panel,
-.validation-panel,
-.yaml-export-panel {
-  display: grid;
-}
-
-.yaml-import-panel,
-.validation-panel {
-  overflow: hidden;
-}
-
-.yaml-import-panel,
-.validation-panel {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 16px;
-  width: min(760px, 100%);
-}
-
-.yaml-export-panel {
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 14px;
-  width: min(840px, 100%);
-}
-
-.scenario-panel__header,
-.yaml-import-panel__header,
-.yaml-export-panel__header {
+.scenario-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-
-.scenario-panel__header {
   margin-bottom: 20px;
 }
 
-.scenario-panel__header h2,
-.yaml-import-panel__header h2,
-.validation-panel__header h2,
-.yaml-export-panel__header h2 {
+.scenario-panel__header h2 {
   margin: 0;
   color: #101827;
-}
-
-.scenario-panel__close-button,
-.scenario-panel__field button,
-.yaml-import-panel__actions button,
-.yaml-import-panel__close-button,
-.validation-panel__actions button,
-.yaml-export-panel__actions button {
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #173d9a;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 800;
-  cursor: pointer;
 }
 
 .scenario-panel__close-button,
 .scenario-panel__field button {
   min-height: 34px;
   padding: 7px 10px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
   color: #172033;
+  font: inherit;
   font-size: 0.86rem;
-}
-
-.yaml-import-panel__actions button:hover,
-.yaml-import-panel__close-button:hover,
-.validation-panel__actions button:hover,
-.yaml-export-panel__actions button:hover {
-  border-color: #2563eb;
-  background: #eaf1ff;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .scenario-panel__form {
@@ -1107,8 +1198,7 @@
   gap: 16px;
 }
 
-.scenario-panel__field,
-.yaml-import-panel__field {
+.scenario-panel__field {
   display: grid;
   gap: 7px;
   color: #334155;
@@ -1122,9 +1212,7 @@
 
 .scenario-panel input,
 .scenario-panel select,
-.scenario-panel textarea,
-.yaml-import-panel__field textarea,
-.yaml-import-panel__field input {
+.scenario-panel textarea {
   width: 100%;
   min-height: 42px;
   padding: 9px 11px;
@@ -1133,11 +1221,6 @@
   background: #ffffff;
   color: #172033;
   font: inherit;
-}
-
-.scenario-panel input,
-.scenario-panel select,
-.scenario-panel textarea {
   font-weight: 500;
   text-align: right;
 }
@@ -1160,20 +1243,128 @@
   gap: 14px;
 }
 
-.yaml-import-panel__body,
-.validation-panel__content {
+.scenario-panel__empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.yaml-import-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-start;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.yaml-import-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  width: min(760px, 100%);
+  height: 100%;
+  padding: 24px;
+  overflow: hidden;
+  border-left: 1px solid #d5dce8;
+  background: #ffffff;
+  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
+}
+
+.yaml-import-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.yaml-import-panel__header h2 {
+  margin: 0;
+  color: #101827;
+}
+
+.yaml-import-panel__body {
   display: grid;
   align-content: start;
+  gap: 14px;
   min-height: 0;
   overflow-y: auto;
 }
 
-.yaml-import-panel__body {
-  gap: 14px;
+.yaml-import-panel__field {
+  display: grid;
+  gap: 7px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
-.validation-panel__content {
-  gap: 18px;
+.yaml-import-panel__field textarea,
+.yaml-import-panel__field input,
+.yaml-import-panel__field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+}
+
+.yaml-import-panel__mode-group,
+.yaml-import-panel__append-options {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.yaml-import-panel__mode-group {
+  margin: 0;
+}
+
+.yaml-import-panel__mode-group legend {
+  padding: 0 2px;
+  color: #101827;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.yaml-import-panel__mode-group label,
+.yaml-import-panel__checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.yaml-import-panel__mode-group input,
+.yaml-import-panel__checkbox-field input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0f766e;
+}
+
+.yaml-import-panel__hint {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed #c9d3e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .yaml-import-panel__field textarea {
@@ -1202,8 +1393,7 @@
   color: #991b1b;
 }
 
-.yaml-import-panel__errors h3,
-.validation-panel__section h3 {
+.yaml-import-panel__errors h3 {
   margin: 0;
   font-size: 1rem;
 }
@@ -1215,25 +1405,80 @@
   padding: 0 18px 0 0;
 }
 
-.yaml-import-panel__actions,
-.validation-panel__actions,
-.yaml-export-panel__actions {
+.yaml-import-panel__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.validation-panel__section,
-.validation-panel__list {
+.yaml-import-panel__actions button,
+.yaml-import-panel__close-button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.yaml-import-panel__actions button:hover,
+.yaml-import-panel__close-button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
+.validation-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-start;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.validation-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  width: min(760px, 100%);
+  height: 100%;
+  padding: 24px;
+  overflow: hidden;
+  border-left: 1px solid #d5dce8;
+  background: #ffffff;
+  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
+}
+
+.validation-panel__header h2 {
+  margin: 0;
+  color: #101827;
+}
+
+.validation-panel__content {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.validation-panel__section {
   display: grid;
   gap: 10px;
 }
 
 .validation-panel__section h3 {
+  margin: 0;
   color: #101827;
+  font-size: 1rem;
 }
 
 .validation-panel__list {
+  display: grid;
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -1275,6 +1520,63 @@
   color: #64748b;
 }
 
+.validation-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.validation-panel__actions button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.validation-panel__actions button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
+.yaml-export-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-start;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.yaml-export-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 14px;
+  width: min(840px, 100%);
+  height: 100%;
+  padding: 24px;
+  border-left: 1px solid #d5dce8;
+  background: #ffffff;
+  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
+}
+
+.yaml-export-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.yaml-export-panel__header h2 {
+  margin: 0;
+  color: #101827;
+}
+
 .yaml-export-panel__preview {
   width: 100%;
   min-height: 0;
@@ -1303,6 +1605,31 @@
   color: #166534;
   font-size: 0.9rem;
   font-weight: 800;
+}
+
+.yaml-export-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+.yaml-export-panel__actions button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.yaml-export-panel__actions button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
 }
 
 @media (max-width: 760px) {
