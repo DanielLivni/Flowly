@@ -983,50 +983,122 @@
   background: #ffe4e6;
 }
 
-.scenario-panel-backdrop {
+.scenario-panel-backdrop,
+.yaml-import-panel-backdrop,
+.validation-panel-backdrop,
+.yaml-export-panel-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
   display: flex;
   justify-content: flex-start;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.scenario-panel-backdrop {
+  z-index: 20;
   background: rgba(15, 23, 42, 0.35);
+}
+
+.yaml-import-panel-backdrop,
+.validation-panel-backdrop,
+.yaml-export-panel-backdrop {
+  z-index: 30;
+}
+
+.scenario-panel,
+.yaml-import-panel,
+.validation-panel,
+.yaml-export-panel {
+  height: 100%;
+  padding: 24px;
+  border-left: 1px solid #d5dce8;
+  background: #ffffff;
+  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
 }
 
 .scenario-panel {
   width: min(720px, 100%);
-  height: 100%;
-  padding: 24px;
   overflow-y: auto;
-  border-left: 1px solid #d5dce8;
-  background: #ffffff;
   box-shadow: -16px 0 34px rgba(15, 23, 42, 0.2);
 }
 
-.scenario-panel__header {
+.yaml-import-panel,
+.validation-panel,
+.yaml-export-panel {
+  display: grid;
+}
+
+.yaml-import-panel,
+.validation-panel {
+  overflow: hidden;
+}
+
+.yaml-import-panel,
+.validation-panel {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  width: min(760px, 100%);
+}
+
+.yaml-export-panel {
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 14px;
+  width: min(840px, 100%);
+}
+
+.scenario-panel__header,
+.yaml-import-panel__header,
+.yaml-export-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.scenario-panel__header {
   margin-bottom: 20px;
 }
 
-.scenario-panel__header h2 {
+.scenario-panel__header h2,
+.yaml-import-panel__header h2,
+.validation-panel__header h2,
+.yaml-export-panel__header h2 {
   margin: 0;
   color: #101827;
+}
+
+.scenario-panel__close-button,
+.scenario-panel__field button,
+.yaml-import-panel__actions button,
+.yaml-import-panel__close-button,
+.validation-panel__actions button,
+.yaml-export-panel__actions button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c9d3e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #173d9a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .scenario-panel__close-button,
 .scenario-panel__field button {
   min-height: 34px;
   padding: 7px 10px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
   color: #172033;
-  font: inherit;
   font-size: 0.86rem;
-  font-weight: 800;
-  cursor: pointer;
+}
+
+.yaml-import-panel__actions button:hover,
+.yaml-import-panel__close-button:hover,
+.validation-panel__actions button:hover,
+.yaml-export-panel__actions button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
 }
 
 .scenario-panel__form {
@@ -1035,7 +1107,8 @@
   gap: 16px;
 }
 
-.scenario-panel__field {
+.scenario-panel__field,
+.yaml-import-panel__field {
   display: grid;
   gap: 7px;
   color: #334155;
@@ -1049,7 +1122,9 @@
 
 .scenario-panel input,
 .scenario-panel select,
-.scenario-panel textarea {
+.scenario-panel textarea,
+.yaml-import-panel__field textarea,
+.yaml-import-panel__field input {
   width: 100%;
   min-height: 42px;
   padding: 9px 11px;
@@ -1058,6 +1133,11 @@
   background: #ffffff;
   color: #172033;
   font: inherit;
+}
+
+.scenario-panel input,
+.scenario-panel select,
+.scenario-panel textarea {
   font-weight: 500;
   text-align: right;
 }
@@ -1080,76 +1160,20 @@
   gap: 14px;
 }
 
-.scenario-panel__empty {
-  margin: 0;
-  padding: 12px;
-  border: 1px dashed #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 0.9rem;
-}
-
-.yaml-import-panel-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  justify-content: flex-start;
-  background: rgba(15, 23, 42, 0.38);
-}
-
-.yaml-import-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 16px;
-  width: min(760px, 100%);
-  height: 100%;
-  padding: 24px;
-  overflow: hidden;
-  border-left: 1px solid #d5dce8;
-  background: #ffffff;
-  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
-}
-
-.yaml-import-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.yaml-import-panel__header h2 {
-  margin: 0;
-  color: #101827;
-}
-
-.yaml-import-panel__body {
+.yaml-import-panel__body,
+.validation-panel__content {
   display: grid;
   align-content: start;
-  gap: 14px;
   min-height: 0;
   overflow-y: auto;
 }
 
-.yaml-import-panel__field {
-  display: grid;
-  gap: 7px;
-  color: #334155;
-  font-size: 0.88rem;
-  font-weight: 800;
+.yaml-import-panel__body {
+  gap: 14px;
 }
 
-.yaml-import-panel__field textarea,
-.yaml-import-panel__field input {
-  width: 100%;
-  min-height: 42px;
-  padding: 9px 11px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #ffffff;
-  color: #172033;
-  font: inherit;
+.validation-panel__content {
+  gap: 18px;
 }
 
 .yaml-import-panel__field textarea {
@@ -1178,7 +1202,8 @@
   color: #991b1b;
 }
 
-.yaml-import-panel__errors h3 {
+.yaml-import-panel__errors h3,
+.validation-panel__section h3 {
   margin: 0;
   font-size: 1rem;
 }
@@ -1190,80 +1215,25 @@
   padding: 0 18px 0 0;
 }
 
-.yaml-import-panel__actions {
+.yaml-import-panel__actions,
+.validation-panel__actions,
+.yaml-export-panel__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.yaml-import-panel__actions button,
-.yaml-import-panel__close-button {
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #173d9a;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.yaml-import-panel__actions button:hover,
-.yaml-import-panel__close-button:hover {
-  border-color: #2563eb;
-  background: #eaf1ff;
-}
-
-.validation-panel-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  justify-content: flex-start;
-  background: rgba(15, 23, 42, 0.38);
-}
-
-.validation-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 16px;
-  width: min(760px, 100%);
-  height: 100%;
-  padding: 24px;
-  overflow: hidden;
-  border-left: 1px solid #d5dce8;
-  background: #ffffff;
-  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
-}
-
-.validation-panel__header h2 {
-  margin: 0;
-  color: #101827;
-}
-
-.validation-panel__content {
-  display: grid;
-  align-content: start;
-  gap: 18px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.validation-panel__section {
+.validation-panel__section,
+.validation-panel__list {
   display: grid;
   gap: 10px;
 }
 
 .validation-panel__section h3 {
-  margin: 0;
   color: #101827;
-  font-size: 1rem;
 }
 
 .validation-panel__list {
-  display: grid;
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -1305,63 +1275,6 @@
   color: #64748b;
 }
 
-.validation-panel__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.validation-panel__actions button {
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #173d9a;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.validation-panel__actions button:hover {
-  border-color: #2563eb;
-  background: #eaf1ff;
-}
-
-.yaml-export-panel-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  justify-content: flex-start;
-  background: rgba(15, 23, 42, 0.38);
-}
-
-.yaml-export-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 14px;
-  width: min(840px, 100%);
-  height: 100%;
-  padding: 24px;
-  border-left: 1px solid #d5dce8;
-  background: #ffffff;
-  box-shadow: -16px 0 34px rgba(15, 23, 42, 0.22);
-}
-
-.yaml-export-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.yaml-export-panel__header h2 {
-  margin: 0;
-  color: #101827;
-}
-
 .yaml-export-panel__preview {
   width: 100%;
   min-height: 0;
@@ -1390,31 +1303,6 @@
   color: #166534;
   font-size: 0.9rem;
   font-weight: 800;
-}
-
-.yaml-export-panel__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-start;
-}
-
-.yaml-export-panel__actions button {
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid #c9d3e1;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #173d9a;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.yaml-export-panel__actions button:hover {
-  border-color: #2563eb;
-  background: #eaf1ff;
 }
 
 @media (max-width: 760px) {
