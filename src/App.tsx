@@ -49,6 +49,7 @@ type DecisionNodeType =
   | 'choice'
   | 'instruction'
   | 'note'
+  | 'agentInstruction'
   | 'end'
   | 'parameterUpdate'
   | 'condition'
@@ -392,11 +393,21 @@ type DismissibleNoticeProps = {
 }
 
 type SourceHandleOption = {
+  currentTargetId?: string
   value: string
   label: string
 }
 
 type YamlImportMode = 'replace' | 'append'
+type AppendLayoutMode = 'preserve' | 'auto'
+
+type ConfirmDialogState = {
+  cancelLabel?: string
+  confirmLabel: string
+  message: string
+  title: string
+  variant?: 'danger' | 'primary'
+}
 
 type ParseYamlImportOptions = {
   allowedExternalStepIds?: Set<string>
@@ -407,7 +418,8 @@ const typeLabels: Record<DecisionNodeType, string> = {
   question: 'שאלה',
   choice: 'בחירה',
   instruction: 'הנחיה',
-  note: 'הערה',
+  note: 'הערה (ישן)',
+  agentInstruction: 'הוראה לסוכן',
   end: 'סיום',
   parameterUpdate: 'עדכון פרמטר',
   condition: 'תנאי IF/THEN',
@@ -461,7 +473,7 @@ const sidebarActions: SidebarAction[] = [
   { nodeType: 'question', label: 'הוסף שאלה' },
   { nodeType: 'choice', label: 'הוסף בחירה' },
   { nodeType: 'instruction', label: 'הוסף הנחיה' },
-  { nodeType: 'note', label: 'הוסף הערה' },
+  { nodeType: 'agentInstruction', label: 'הוסף הוראה לסוכן' },
   { nodeType: 'end', label: 'הוסף סיום' },
   { nodeType: 'parameterUpdate', label: 'הוסף עדכון פרמטר' },
   { nodeType: 'condition', label: 'הוסף תנאי IF/THEN' },
@@ -470,7 +482,7 @@ const sidebarActions: SidebarAction[] = [
 ]
 
 const decisionNodeTypes = new Set<DecisionNodeType>(
-  sidebarActions.map((action) => action.nodeType),
+  [...sidebarActions.map((action) => action.nodeType), 'note'],
 )
 
 const initialScenarioMetadata: ScenarioMetadata = {
@@ -485,6 +497,7 @@ const formatNodeId = (nodeNumber: number) =>
   `STEP-${String(nodeNumber).padStart(3, '0')}`
 
 const stepIdPattern = /^STEP-(\d+)$/
+const stepReferencePattern = /\bSTEP-\d+\b/g
 
 const getHighestStepNumber = (stepIds: Iterable<string>) => {
   let highestStepNumber = 0
@@ -509,6 +522,10 @@ const getHighestStepNumber = (stepIds: Iterable<string>) => {
 const getNextStepId = (stepIds: Iterable<string>) =>
   formatNodeId(getHighestStepNumber(stepIds) + 1)
 
+const getStepReferencesFromText = (text: string) => [
+  ...new Set(text.match(stepReferencePattern) ?? []),
+]
+
 const DIRECT_SOURCE_HANDLE_ID = 'out'
 const DIRECT_EDGE_LABEL = 'המשך'
 const CONDITION_THEN_HANDLE_ID = 'condition-then'
@@ -517,7 +534,7 @@ const conditionSourceHandleLabels: Record<string, string> = {
   [CONDITION_THEN_HANDLE_ID]: 'מתקיים',
   [CONDITION_ELSE_HANDLE_ID]: 'לא מתקיים',
 }
-const DEFAULT_EDGE_STYLE: EdgeStyle = 'orthogonal'
+const DEFAULT_EDGE_STYLE: EdgeStyle = 'curved'
 const TARGET_HANDLE_TOP: TargetHandleId = 'target-top'
 const TARGET_HANDLE_RIGHT: TargetHandleId = 'target-right'
 const TARGET_HANDLE_BOTTOM: TargetHandleId = 'target-bottom'
@@ -553,6 +570,7 @@ const nodeLayoutWidth = 218
 const nodeLayoutHeight = 140
 
 const internalNodeTypes = new Set<DecisionNodeType>([
+  'agentInstruction',
   'parameterUpdate',
   'condition',
   'action',
@@ -812,6 +830,7 @@ const getSourceHandleDisplayLabel = (
 const getAvailableSourceHandleOptions = (
   node: DecisionNode | null,
   edges: DecisionEdge[],
+  includeConnectedHandles = false,
 ): SourceHandleOption[] => {
   if (!node) {
     return []
@@ -820,14 +839,21 @@ const getAvailableSourceHandleOptions = (
   const nodeData = normalizeNodeData(node.data)
 
   return getAllowedOutgoingHandles(nodeData)
-    .filter(
-      (sourceHandle) =>
-        !getOutgoingEdgeForHandle(edges, node.id, sourceHandle),
-    )
-    .map((sourceHandle) => ({
-      value: sourceHandle,
-      label: getSourceHandleDisplayLabel(nodeData, sourceHandle),
-    }))
+    .flatMap((sourceHandle) => {
+      const currentEdge = getOutgoingEdgeForHandle(edges, node.id, sourceHandle)
+
+      if (currentEdge && !includeConnectedHandles) {
+        return []
+      }
+
+      return [
+        {
+          currentTargetId: currentEdge?.target,
+          value: sourceHandle,
+          label: getSourceHandleDisplayLabel(nodeData, sourceHandle),
+        },
+      ]
+    })
 }
 
 const getInternalNodeSummaryItems = (nodeData: DecisionNodeData) => {
@@ -893,7 +919,22 @@ const getEditableInternalNodeFields = (
 const getInternalNodeBadgeLabel = (nodeType: DecisionNodeType) =>
   nodeType === 'action'
     ? 'פנימי · מסיים תסריט'
-    : 'פנימי · מבוצע מאחורי הקלעים'
+    : nodeType === 'agentInstruction'
+      ? 'פנימי · הוראה לסוכן'
+      : 'פנימי · מבוצע מאחורי הקלעים'
+
+const getScriptFieldLabel = (nodeType: DecisionNodeType) =>
+  nodeType === 'agentInstruction' ? 'הוראה לסוכן' : 'טקסט לנציג'
+
+const getScriptPlaceholder = (nodeType: DecisionNodeType) =>
+  nodeType === 'agentInstruction'
+    ? 'הוראת הסוכן תופיע כאן'
+    : isInternalNodeType(nodeType)
+      ? 'תיאור פנימי אופציונלי'
+      : 'טקסט התסריט יופיע כאן'
+
+const shouldShowScriptFieldInSidePanel = (nodeType: DecisionNodeType) =>
+  !isInternalNodeType(nodeType) || nodeType === 'agentInstruction'
 
 const getNodeDataById = (nodes: DecisionNode[], nodeId: string) => {
   const node = nodes.find((currentNode) => currentNode.id === nodeId)
@@ -1347,6 +1388,21 @@ const validateFlowForYamlExport = (
       addError(`בשלב ${stepLabel} חסר טקסט לנציג.`, node.id)
     }
 
+    if (nodeData.nodeType === 'agentInstruction') {
+      if (!nodeData.script.trim()) {
+        addError(`בשלב ${stepLabel} חסרה הוראה לסוכן.`, node.id)
+      }
+
+      getStepReferencesFromText(nodeData.script).forEach((referencedStepId) => {
+        if (!nodeIdSet.has(referencedStepId)) {
+          addWarning(
+            `בשלב ${stepLabel}, ההוראה לסוכן מזכירה שלב שלא קיים: ${referencedStepId}.`,
+            node.id,
+          )
+        }
+      })
+    }
+
     if (isTerminalNodeType(nodeData.nodeType)) {
       if (edges.some((edge) => edge.source === node.id)) {
         addError(
@@ -1555,7 +1611,7 @@ const validateFlowForYamlExport = (
 }
 
 const createAutoLayoutPositions = (
-  steps: ImportedStep[],
+  steps: Array<{ id: string }>,
   edges: Array<Pick<DecisionEdge, 'source' | 'target'>>,
 ) => {
   const graph = new dagre.graphlib.Graph()
@@ -1774,6 +1830,13 @@ const parseYamlImportText = (
 
     if (nodeType && !isInternalNodeType(nodeType) && typeof script !== 'string') {
       errors.push(`בשלב ${stepId || stepIndex + 1}, חסר script תקין.`)
+    }
+
+    if (
+      nodeType === 'agentInstruction' &&
+      (typeof script !== 'string' || !script.trim())
+    ) {
+      errors.push(`בשלב ${stepId || stepIndex + 1}, חסרה הוראה לסוכן ב-script.`)
     }
 
     const images: Array<Omit<DecisionImage, 'id'>> = []
@@ -2341,7 +2404,11 @@ const buildYamlExport = (
         step.visibility = 'internal'
       }
 
-      if (!isInternalNodeType(nodeData.nodeType) || nodeData.script.trim()) {
+      if (
+        !isInternalNodeType(nodeData.nodeType) ||
+        nodeData.nodeType === 'agentInstruction' ||
+        nodeData.script.trim()
+      ) {
         step.script = nodeData.script
       }
 
@@ -2826,7 +2893,7 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
           dir="rtl"
           rows={4}
           className="decision-node__script-editor nodrag nopan"
-          aria-label="עריכת טקסט לנציג"
+          aria-label={`עריכת ${getScriptFieldLabel(nodeData.nodeType)}`}
           onBlur={() => {
             if (!shouldSaveScriptOnBlurRef.current) {
               shouldSaveScriptOnBlurRef.current = true
@@ -2856,10 +2923,7 @@ function DecisionTreeNode({ id, data, selected }: NodeProps<DecisionNode>) {
         />
       ) : (
         <p className={scriptText ? 'decision-node__script' : 'decision-node__placeholder'}>
-          {scriptText ||
-            (isInternalNodeType(nodeData.nodeType)
-              ? 'תיאור פנימי אופציונלי'
-              : 'טקסט התסריט יופיע כאן')}
+          {scriptText || getScriptPlaceholder(nodeData.nodeType)}
         </p>
       )}
 
@@ -3190,6 +3254,54 @@ function DismissibleNotice({
   )
 }
 
+function ConfirmDialog({
+  dialog,
+  onCancel,
+  onConfirm,
+}: {
+  dialog: ConfirmDialogState
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="flowly-dialog-backdrop" role="presentation">
+      <section
+        className="flowly-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="flowly-dialog-title"
+        dir="rtl"
+      >
+        <h2 id="flowly-dialog-title">{dialog.title}</h2>
+        <p>{dialog.message}</p>
+        <div className="flowly-dialog__actions">
+          <button
+            type="button"
+            className={[
+              'flowly-dialog__button',
+              dialog.variant === 'danger' ? 'flowly-dialog__button--danger' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onClick={onConfirm}
+          >
+            {dialog.confirmLabel}
+          </button>
+          {dialog.cancelLabel ? (
+            <button
+              type="button"
+              className="flowly-dialog__button flowly-dialog__button--secondary"
+              onClick={onCancel}
+            >
+              {dialog.cancelLabel}
+            </button>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const reactFlowInstanceRef = useRef<ReactFlowInstance<DecisionNode, DecisionEdge> | null>(
     null,
@@ -3207,6 +3319,9 @@ function App() {
   const nextActionNumber = useRef(1)
   const nextToolNumber = useRef(1)
   const nextConditionRuleNumber = useRef(1)
+  const confirmDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(
+    null,
+  )
   const [scenarioMetadata, setScenarioMetadata] = useState<ScenarioMetadata>(
     initialScenarioMetadata,
   )
@@ -3226,6 +3341,11 @@ function App() {
   const [yamlImportFileName, setYamlImportFileName] = useState('')
   const [shouldConnectAppendedFlow, setShouldConnectAppendedFlow] = useState(false)
   const [appendSourceHandle, setAppendSourceHandle] = useState('')
+  const [appendLayoutMode, setAppendLayoutMode] =
+    useState<AppendLayoutMode>('auto')
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(
+    null,
+  )
   const [yamlCopyMessage, setYamlCopyMessage] = useState('')
   const [isDraftExport, setIsDraftExport] = useState(false)
   const [appMessage, setAppMessage] = useState('')
@@ -3249,9 +3369,24 @@ function App() {
     [selectedNode],
   )
   const appendSourceOptions = useMemo(
-    () => getAvailableSourceHandleOptions(selectedNode, edges),
+    () => getAvailableSourceHandleOptions(selectedNode, edges, true),
     [edges, selectedNode],
   )
+  const selectedAppendSourceMode = selectedNodeData?.nodeType === 'condition'
+    ? 'condition'
+    : selectedNodeData && selectedNodeData.options.length > 0
+      ? 'options'
+      : selectedNodeData && isTerminalNodeType(selectedNodeData.nodeType)
+        ? 'terminal'
+        : selectedNodeData
+          ? 'direct'
+          : null
+  const appendSourceSelectLabel =
+    selectedAppendSourceMode === 'options'
+      ? 'לאיזו אפשרות בחירה לחבר את התסריט המיובא?'
+      : selectedAppendSourceMode === 'condition'
+        ? 'לאיזה ענף תנאי לחבר את התסריט המיובא?'
+        : 'נקודת חיבור'
   const activeAppendSourceHandle = appendSourceOptions.some(
     (sourceOption) => sourceOption.value === appendSourceHandle,
   )
@@ -3286,6 +3421,26 @@ function App() {
   )
   const hasValidationErrors = Boolean(validationReport?.errors.length)
   const hasValidationWarnings = Boolean(validationReport?.warnings.length)
+
+  const closeConfirmDialog = useCallback((confirmed: boolean) => {
+    confirmDialogResolverRef.current?.(confirmed)
+    confirmDialogResolverRef.current = null
+    setConfirmDialog(null)
+  }, [])
+
+  const requestConfirmation = useCallback(
+    (dialog: ConfirmDialogState) =>
+      new Promise<boolean>((resolve) => {
+        confirmDialogResolverRef.current?.(false)
+        confirmDialogResolverRef.current = resolve
+        setConfirmDialog({
+          cancelLabel: 'ביטול',
+          variant: 'primary',
+          ...dialog,
+        })
+      }),
+    [],
+  )
 
   const getCanvasPlacementFromClientPosition = useCallback(
     (clientPosition: XYPosition) => {
@@ -3578,10 +3733,13 @@ function App() {
   )
 
   const deleteNodeById = useCallback(
-    (nodeId: string) => {
-      const shouldDelete = window.confirm(
-        'למחוק את השלב הזה? כל החיבורים אליו וממנו יימחקו.',
-      )
+    async (nodeId: string) => {
+      const shouldDelete = await requestConfirmation({
+        title: 'מחיקת שלב',
+        message: 'למחוק את השלב הזה? כל החיבורים אליו וממנו יימחקו.',
+        confirmLabel: 'מחק שלב',
+        variant: 'danger',
+      })
 
       if (!shouldDelete) {
         return
@@ -3608,7 +3766,7 @@ function App() {
         setAppMessage('שלב הפתיחה נמחק. יש לבחור שלב פתיחה חדש.')
       }
     },
-    [scenarioMetadata.entryNodeId, setEdges, setNodes],
+    [requestConfirmation, scenarioMetadata.entryNodeId, setEdges, setNodes],
   )
 
   const displayNodes = useMemo<DecisionNode[]>(
@@ -3734,6 +3892,22 @@ function App() {
   }, [nodes.length])
 
   useEffect(() => {
+    if (!confirmDialog) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeConfirmDialog(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [closeConfirmDialog, confirmDialog])
+
+  useEffect(() => {
     if (!pendingConnectionPopover) {
       return
     }
@@ -3772,6 +3946,7 @@ function App() {
     setYamlImportFileName('')
     setShouldConnectAppendedFlow(false)
     setAppendSourceHandle('')
+    setAppendLayoutMode('auto')
     setIsYamlImportPanelOpen(true)
   }, [])
 
@@ -3793,6 +3968,7 @@ function App() {
       setYamlImportFileName('')
       setShouldConnectAppendedFlow(false)
       setAppendSourceHandle('')
+      setAppendLayoutMode('auto')
       setYamlCopyMessage('')
       setIsDraftExport(false)
       setPendingConnectionPopover(null)
@@ -3836,14 +4012,41 @@ function App() {
             sourceHandle: string
           }
         | null,
+      replaceExistingSourceConnection = false,
     ) => {
       const currentNodeIds = new Set(nodes.map((node) => node.id))
       const reservedNodeIds = new Set(currentNodeIds)
       const stepIdMap = new Map<string, string>()
+      const importedLayoutNodes =
+        appendLayoutMode === 'auto'
+          ? (() => {
+              const importedNodeIds = new Set(
+                importedFlow.nodes.map((node) => node.id),
+              )
+              const layoutPositions = createAutoLayoutPositions(
+                importedFlow.nodes.map((node) => ({ id: node.id })),
+                importedFlow.edges
+                  .filter(
+                    (edge) =>
+                      importedNodeIds.has(edge.source) &&
+                      importedNodeIds.has(edge.target),
+                  )
+                  .map((edge) => ({
+                    source: edge.source,
+                    target: edge.target,
+                  })),
+              )
+
+              return importedFlow.nodes.map((node) => ({
+                ...node,
+                position: layoutPositions[node.id] ?? node.position,
+              }))
+            })()
+          : importedFlow.nodes
 
       // Append always remaps imported STEP ids. This keeps the existing canvas
       // immutable and makes collision handling deterministic even for partial overlaps.
-      importedFlow.nodes.forEach((node) => {
+      importedLayoutNodes.forEach((node) => {
         const nextNodeId = getNextStepId(reservedNodeIds)
 
         stepIdMap.set(node.id, nextNodeId)
@@ -3853,11 +4056,11 @@ function App() {
       const importedEntryNodeId =
         stepIdMap.get(importedFlow.scenarioMetadata.entryNodeId) ?? ''
       const placementOffset = getAppendPlacementOffset(
-        importedFlow.nodes,
+        importedLayoutNodes,
         nodes,
         getVisibleCanvasCenterPosition(),
       )
-      const remappedNodes: DecisionNode[] = importedFlow.nodes.map((node) => ({
+      const remappedNodes: DecisionNode[] = importedLayoutNodes.map((node) => ({
         ...node,
         id: stepIdMap.get(node.id) ?? node.id,
         position: {
@@ -3915,6 +4118,15 @@ function App() {
           targetHandle: null,
         }
 
+        if (replaceExistingSourceConnection) {
+          nextEdges = nextEdges.filter(
+            (edge) =>
+              edge.source !== connectSource.sourceId ||
+              (edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID) !==
+                connectSource.sourceHandle,
+          )
+        }
+
         if (
           sourceData &&
           isDecisionConnectionValid(
@@ -3955,6 +4167,7 @@ function App() {
       setYamlImportMode('replace')
       setShouldConnectAppendedFlow(false)
       setAppendSourceHandle('')
+      setAppendLayoutMode('auto')
       setYamlCopyMessage('')
       setIsDraftExport(false)
       setPendingConnectionPopover(null)
@@ -4020,6 +4233,7 @@ function App() {
       })
     },
     [
+      appendLayoutMode,
       edges,
       editorViewport,
       getVisibleCanvasCenterPosition,
@@ -4030,7 +4244,7 @@ function App() {
     ],
   )
 
-  const importYamlText = useCallback(() => {
+  const importYamlText = useCallback(async () => {
     const importResult = parseYamlImportText(
       yamlImportText,
       yamlImportMode === 'append'
@@ -4064,14 +4278,50 @@ function App() {
         return
       }
 
-      applyAppendedFlow(importResult.flow, connectSource)
+      const existingSourceEdge = connectSource
+        ? getOutgoingEdgeForHandle(
+            edges,
+            connectSource.sourceId,
+            connectSource.sourceHandle,
+          )
+        : undefined
+      const shouldReplaceExistingConnection = Boolean(existingSourceEdge)
+
+      if (
+        shouldReplaceExistingConnection &&
+        !(await requestConfirmation({
+          title: 'החלפת חיבור קיים',
+          message:
+            selectedAppendSourceMode === 'options'
+              ? 'לאפשרות הבחירה הזו כבר קיים חיבור. האם להחליף אותו בחיבור לתסריט המיובא?'
+              : selectedAppendSourceMode === 'condition'
+                ? 'לענף התנאי הזה כבר קיים חיבור. האם להחליף אותו בחיבור לתסריט המיובא?'
+                : 'לנקודת החיבור הזו כבר קיים חיבור. האם להחליף אותו בחיבור לתסריט המיובא?',
+          confirmLabel: 'החלף חיבור',
+          variant: 'danger',
+        }))
+      ) {
+        return
+      }
+
+      applyAppendedFlow(
+        importResult.flow,
+        connectSource,
+        shouldReplaceExistingConnection,
+      )
 
       return
     }
 
     if (
       nodes.length > 0 &&
-      !window.confirm('ייבוא הקובץ יחליף את התסריט הנוכחי. להמשיך?')
+      !(await requestConfirmation({
+        title: 'ייבוא תסריט',
+        message:
+          'ייבוא הקובץ יחליף את התסריט הנוכחי. אם לא ייצאת YAML, העבודה הנוכחית תאבד.',
+        confirmLabel: 'ייבא והחלף',
+        variant: 'danger',
+      }))
     ) {
       return
     }
@@ -4081,8 +4331,11 @@ function App() {
     activeAppendSourceHandle,
     applyAppendedFlow,
     applyImportedFlow,
+    edges,
     nodes,
+    requestConfirmation,
     scenarioMetadata.entryNodeId,
+    selectedAppendSourceMode,
     selectedNode,
     shouldApplyAppendConnection,
     yamlImportMode,
@@ -4108,14 +4361,18 @@ function App() {
     [],
   )
 
-  const createNewScenario = useCallback(() => {
+  const createNewScenario = useCallback(async () => {
     const hasCurrentFlow = nodes.length > 0 || edges.length > 0
 
     if (
       hasCurrentFlow &&
-      !window.confirm(
-        'יצירת תסריט חדש תנקה את התסריט הנוכחי מהמסך. אם לא ייצאת YAML, העבודה תאבד. להמשיך?',
-      )
+      !(await requestConfirmation({
+        title: 'תסריט חדש',
+        message:
+          'יצירת תסריט חדש תנקה את העבודה הנוכחית. אם לא ייצאת YAML, העבודה תאבד.',
+        confirmLabel: 'פתח תסריט חדש',
+        variant: 'danger',
+      }))
     ) {
       return
     }
@@ -4138,6 +4395,7 @@ function App() {
     setYamlImportMode('replace')
     setShouldConnectAppendedFlow(false)
     setAppendSourceHandle('')
+    setAppendLayoutMode('auto')
     setAppMessage('נוצר תסריט חדש. יש לייצא YAML כדי לשמור את העבודה.')
     setEdgeStyle(DEFAULT_EDGE_STYLE)
     setEditorViewport(initialViewport)
@@ -4151,7 +4409,7 @@ function App() {
     nextConditionRuleNumber.current = 1
 
     void reactFlowInstanceRef.current?.setViewport(initialViewport, { duration: 250 })
-  }, [edges.length, nodes.length, setEdges, setNodes])
+  }, [edges.length, nodes.length, requestConfirmation, setEdges, setNodes])
 
   const openYamlExportPanelWithoutValidation = useCallback((exportAsDraft = false) => {
     setYamlCopyMessage('')
@@ -4649,7 +4907,7 @@ function App() {
       return
     }
 
-    deleteNodeById(selectedNode.id)
+    void deleteNodeById(selectedNode.id)
   }, [deleteNodeById, selectedNode])
 
   const clearNodeSelection = useCallback(() => {
@@ -4662,14 +4920,17 @@ function App() {
     setSelectedEdgeId(null)
   }, [setNodes])
 
-  const deleteSelectedNodes = useCallback(() => {
+  const deleteSelectedNodes = useCallback(async () => {
     if (selectedNodeIds.length === 0) {
       return
     }
 
-    const shouldDelete = window.confirm(
-      'למחוק את השלבים שנבחרו? כל החיבורים אליהם ומהם יימחקו.',
-    )
+    const shouldDelete = await requestConfirmation({
+      title: 'מחיקת שלבים',
+      message: 'למחוק את השלבים שנבחרו? כל החיבורים אליהם ומהם יימחקו.',
+      confirmLabel: 'מחק שלבים',
+      variant: 'danger',
+    })
 
     if (!shouldDelete) {
       return
@@ -4695,7 +4956,13 @@ function App() {
       }))
       setAppMessage('שלב הפתיחה נמחק. יש לבחור שלב פתיחה חדש.')
     }
-  }, [scenarioMetadata.entryNodeId, selectedNodeIds, setEdges, setNodes])
+  }, [
+    requestConfirmation,
+    scenarioMetadata.entryNodeId,
+    selectedNodeIds,
+    setEdges,
+    setNodes,
+  ])
 
   const duplicateSelectedNodes = useCallback(() => {
     if (selectedNodeIds.length === 0) {
@@ -4876,7 +5143,7 @@ function App() {
       }
 
       event.preventDefault()
-      deleteSelectedNode()
+      void deleteSelectedNode()
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -5062,6 +5329,38 @@ function App() {
     [edges, getCanvasPlacementFromClientPosition, nodes],
   )
 
+  const arrangeCurrentNodes = useCallback(() => {
+    if (nodes.length === 0) {
+      setAppMessage('אין כרטיסיות לסידור.')
+
+      return
+    }
+
+    const layoutPositions = createAutoLayoutPositions(
+      nodes.map((node) => ({ id: node.id })),
+      edges.map((edge) => ({ source: edge.source, target: edge.target })),
+    )
+
+    setNodes((currentNodes) =>
+      currentNodes.map((node) =>
+        layoutPositions[node.id]
+          ? {
+              ...node,
+              position: layoutPositions[node.id],
+            }
+          : node,
+      ),
+    )
+    setAppMessage('הכרטיסיות סודרו מחדש')
+
+    window.requestAnimationFrame(() => {
+      void reactFlowInstanceRef.current?.fitView({
+        duration: 250,
+        padding: 0.18,
+      })
+    })
+  }, [edges, nodes, setNodes])
+
   return (
     <main className="app-shell" dir="rtl">
       <header className="top-toolbar">
@@ -5100,6 +5399,13 @@ function App() {
           onClick={openYamlExportPanel}
         >
           ייצוא YAML
+        </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          onClick={arrangeCurrentNodes}
+        >
+          סדר כרטיסיות
         </button>
 
         <div className="canvas-mode-toggle" role="group" aria-label="מצב קנבס">
@@ -5234,12 +5540,17 @@ function App() {
                           {typeLabels[action.nodeType]}
                         </option>
                       ))}
+                      {selectedNodeData.nodeType === 'note' ? (
+                        <option value="note" disabled>
+                          {typeLabels.note}
+                        </option>
+                      ) : null}
                     </select>
                   </label>
 
-                  {!isInternalNodeType(selectedNodeData.nodeType) ? (
+                  {shouldShowScriptFieldInSidePanel(selectedNodeData.nodeType) ? (
                     <label className="properties-panel__field">
-                      <span>טקסט לנציג</span>
+                      <span>{getScriptFieldLabel(selectedNodeData.nodeType)}</span>
                       <textarea
                         value={selectedNodeData.script}
                         dir="rtl"
@@ -5879,6 +6190,7 @@ function App() {
                     onChange={() => {
                       setYamlImportMode('replace')
                       setShouldConnectAppendedFlow(false)
+                      setAppendLayoutMode('auto')
                     }}
                   />
                   <span>ייבוא תסריט חדש במקום הנוכחי</span>
@@ -5897,6 +6209,30 @@ function App() {
 
               {yamlImportMode === 'append' ? (
                 <section className="yaml-import-panel__append-options">
+                  <fieldset className="yaml-import-panel__mode-group">
+                    <legend>סידור הכרטיסיות מהקובץ המיובא</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="append-layout-mode"
+                        value="auto"
+                        checked={appendLayoutMode === 'auto'}
+                        onChange={() => setAppendLayoutMode('auto')}
+                      />
+                      <span>לסדר אוטומטית באזור פנוי</span>
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="append-layout-mode"
+                        value="preserve"
+                        checked={appendLayoutMode === 'preserve'}
+                        onChange={() => setAppendLayoutMode('preserve')}
+                      />
+                      <span>להשתמש במיקומים מהקובץ</span>
+                    </label>
+                  </fieldset>
+
                   <label className="yaml-import-panel__checkbox-field">
                     <input
                       type="checkbox"
@@ -5911,7 +6247,7 @@ function App() {
 
                   {appendSourceOptions.length > 0 ? (
                     <label className="yaml-import-panel__field">
-                      <span>נקודת חיבור</span>
+                      <span>{appendSourceSelectLabel}</span>
                       <select
                         value={activeAppendSourceHandle}
                         dir="rtl"
@@ -5921,11 +6257,19 @@ function App() {
                       >
                         {appendSourceOptions.map((sourceOption) => (
                           <option key={sourceOption.value} value={sourceOption.value}>
-                            {`${selectedNode?.id ?? ''} - ${sourceOption.label}`}
+                            {`${selectedNode?.id ?? ''} - ${sourceOption.label}${
+                              sourceOption.currentTargetId
+                                ? ` (מחובר אל ${sourceOption.currentTargetId})`
+                                : ''
+                            }`}
                           </option>
                         ))}
                       </select>
                     </label>
+                  ) : selectedAppendSourceMode === 'terminal' ? (
+                    <p className="yaml-import-panel__hint">
+                      השלב שנבחר מסיים את התסריט ולא ניתן לחבר ממנו תסריט מיובא.
+                    </p>
                   ) : (
                     <p className="yaml-import-panel__hint">
                       אין כרגע נקודת חיבור פנויה שנבחרה. ה-YAML יתווסף כזרימה נפרדת וניתן לחבר אותו ידנית.
@@ -6119,6 +6463,14 @@ function App() {
             </div>
           </section>
         </div>
+      ) : null}
+
+      {confirmDialog ? (
+        <ConfirmDialog
+          dialog={confirmDialog}
+          onCancel={() => closeConfirmDialog(false)}
+          onConfirm={() => closeConfirmDialog(true)}
+        />
       ) : null}
     </main>
   )

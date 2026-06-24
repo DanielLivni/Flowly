@@ -695,6 +695,39 @@
   height: 11px;
   border: 2px solid #ffffff;
   background: #2563eb;
+  opacity: 0.7;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.decision-node__target-handle {
+  background: #64748b;
+  opacity: 0;
+}
+
+.decision-node:hover .decision-node__target-handle,
+.react-flow__node.selected .decision-node__target-handle {
+  opacity: 0.48;
+}
+
+.decision-node__target-handle:hover,
+.decision-node__target-handle:focus-visible {
+  opacity: 0.9;
+  box-shadow: 0 0 0 5px rgba(100, 116, 139, 0.16);
+}
+
+.decision-node__regular-handle {
+  opacity: 0;
+}
+
+.decision-node:hover .decision-node__regular-handle,
+.react-flow__node.selected .decision-node__regular-handle,
+.decision-node__regular-handle:hover,
+.decision-node__regular-handle:focus-visible {
+  opacity: 0.95;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.14);
 }
 
 .decision-node__target-handle--top {
@@ -970,7 +1003,15 @@
 }
 
 .decision-node__option-handle {
-  left: -22px;
+  left: -18px;
+  opacity: 0.48;
+}
+
+.decision-node__option-row:hover .decision-node__option-handle,
+.decision-node__option-handle:hover,
+.decision-node__option-handle:focus-visible {
+  opacity: 0.95;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.13);
 }
 
 .decision-node__condition-branches {
@@ -995,8 +1036,16 @@
 }
 
 .decision-node__condition-handle {
-  left: -22px;
+  left: -18px;
   background: #0f766e;
+  opacity: 0.55;
+}
+
+.decision-node__condition-branch:hover .decision-node__condition-handle,
+.decision-node__condition-handle:hover,
+.decision-node__condition-handle:focus-visible {
+  opacity: 0.95;
+  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.14);
 }
 
 .decision-node__quick-add-option {
@@ -1540,6 +1589,89 @@
 }
 
 .validation-panel__actions button:hover {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
+.flowly-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.flowly-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(440px, 100%);
+  padding: 22px;
+  border: 1px solid #d5dce8;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 54px rgba(15, 23, 42, 0.22);
+}
+
+.flowly-dialog h2 {
+  margin: 0;
+  color: #101827;
+  font-size: 1.18rem;
+  line-height: 1.25;
+}
+
+.flowly-dialog p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.flowly-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+.flowly-dialog__button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #0f766e;
+  border-radius: 7px;
+  background: #0f766e;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.flowly-dialog__button:hover,
+.flowly-dialog__button:focus-visible {
+  background: #115e59;
+}
+
+.flowly-dialog__button--danger {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.flowly-dialog__button--danger:hover,
+.flowly-dialog__button--danger:focus-visible {
+  background: #b91c1c;
+}
+
+.flowly-dialog__button--secondary {
+  border-color: #c9d3e1;
+  background: #f8fafc;
+  color: #173d9a;
+}
+
+.flowly-dialog__button--secondary:hover,
+.flowly-dialog__button--secondary:focus-visible {
   border-color: #2563eb;
   background: #eaf1ff;
 }
