@@ -14,6 +14,7 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
+  MiniMap,
   Position,
   ReactFlow,
   SelectionMode,
@@ -402,11 +403,38 @@ type YamlImportMode = 'replace' | 'append'
 type AppendLayoutMode = 'preserve' | 'auto'
 
 type ConfirmDialogState = {
+  actions?: Array<{
+    label: string
+    value: DialogActionValue
+    variant?: 'danger' | 'primary' | 'secondary'
+  }>
   cancelLabel?: string
-  confirmLabel: string
+  confirmLabel?: string
   message: string
   title: string
   variant?: 'danger' | 'primary'
+}
+
+type DialogActionValue = 'confirm' | 'cancel' | 'newTab' | 'replaceCurrent'
+
+type ScenarioTab = {
+  edgeStyle: EdgeStyle
+  edges: DecisionEdge[]
+  editorViewport: Viewport
+  id: string
+  isValidationPanelOpen: boolean
+  name: string
+  nodes: DecisionNode[]
+  scenarioMetadata: ScenarioMetadata
+  selectedEdgeId: string | null
+  selectedNodeId: string | null
+  validationReport: ValidationReport | null
+}
+
+type FlowClipboard = {
+  edges: DecisionEdge[]
+  entryNodeId: string
+  nodes: DecisionNode[]
 }
 
 type ParseYamlImportOptions = {
@@ -568,6 +596,24 @@ const targetHandleConfigs: Array<{
 const initialViewport: Viewport = { x: 40, y: 40, zoom: 0.95 }
 const nodeLayoutWidth = 218
 const nodeLayoutHeight = 140
+const initialScenarioTabId = 'scenario-tab-1'
+
+const createEmptyScenarioTab = (id: string, name: string): ScenarioTab => ({
+  edgeStyle: DEFAULT_EDGE_STYLE,
+  edges: [],
+  editorViewport: initialViewport,
+  id,
+  isValidationPanelOpen: false,
+  name,
+  nodes: [],
+  scenarioMetadata: { ...initialScenarioMetadata },
+  selectedEdgeId: null,
+  selectedNodeId: null,
+  validationReport: null,
+})
+
+const hasScenarioTabContent = (tab: Pick<ScenarioTab, 'edges' | 'nodes'>) =>
+  tab.nodes.length > 0 || tab.edges.length > 0
 
 const internalNodeTypes = new Set<DecisionNodeType>([
   'agentInstruction',
@@ -1659,6 +1705,224 @@ const createAutoLayoutPositions = (
       ]
     }),
   )
+}
+
+const cloneNodeDataPreservingIds = (nodeData: DecisionNodeData): DecisionNodeData => ({
+  action: { ...nodeData.action },
+  actions: nodeData.actions.map((action) => ({ ...action })),
+  condition: {
+    logic: nodeData.condition.logic,
+    rules: nodeData.condition.rules.map((rule) => ({ ...rule })),
+  },
+  images: nodeData.images.map((image) => ({ ...image })),
+  links: nodeData.links.map((link) => ({ ...link })),
+  nodeType: nodeData.nodeType,
+  options: nodeData.options.map((option) => ({ ...option })),
+  parameterUpdate: { ...nodeData.parameterUpdate },
+  parameterUpdates: nodeData.parameterUpdates.map((parameterUpdate) => ({
+    ...parameterUpdate,
+  })),
+  script: nodeData.script,
+  tool: { ...nodeData.tool },
+  tools: nodeData.tools.map((tool) => ({ ...tool })),
+})
+
+const getInternalSubgraphEdges = (
+  edges: DecisionEdge[],
+  selectedNodeIdSet: Set<string>,
+) =>
+  edges.filter(
+    (edge) =>
+      selectedNodeIdSet.has(edge.source) && selectedNodeIdSet.has(edge.target),
+  )
+
+const cloneSubgraphWithNewIds = ({
+  basePosition,
+  layoutMode,
+  pasteOffset = { x: 0, y: 0 },
+  reservedNodeIds,
+  sourceEdges,
+  sourceEntryNodeId,
+  sourceNodes,
+  sourceNodeIds,
+}: {
+  basePosition?: XYPosition
+  layoutMode: 'auto' | 'viewport'
+  pasteOffset?: XYPosition
+  reservedNodeIds: Iterable<string>
+  sourceEdges: DecisionEdge[]
+  sourceEntryNodeId: string
+  sourceNodeIds: string[]
+  sourceNodes: DecisionNode[]
+}) => {
+  const selectedNodeIdSet = new Set(sourceNodeIds)
+  const selectedNodes = sourceNodes.filter((node) => selectedNodeIdSet.has(node.id))
+  const reservedIds = new Set(reservedNodeIds)
+  const nodeIdMap = new Map<string, string>()
+  const optionIdMaps = new Map<string, Map<string, string>>()
+  let nextOptionId = 1
+  let nextImageId = 1
+  let nextLinkId = 1
+  let nextParameterUpdateId = 1
+  let nextActionId = 1
+  let nextToolId = 1
+  let nextConditionRuleId = 1
+
+  const clonedNodes: DecisionNode[] = selectedNodes.map((node) => {
+    const nodeData = normalizeNodeData(node.data)
+    const nextNodeId = getNextStepId(reservedIds)
+    const optionIdMap = new Map<string, string>()
+    const options = nodeData.options.map((option) => {
+      const optionId = `option-${nextOptionId}`
+
+      nextOptionId += 1
+      optionIdMap.set(option.id, optionId)
+
+      return { ...option, id: optionId }
+    })
+
+    nodeIdMap.set(node.id, nextNodeId)
+    optionIdMaps.set(node.id, optionIdMap)
+    reservedIds.add(nextNodeId)
+
+    return {
+      ...node,
+      id: nextNodeId,
+      position: { ...node.position },
+      selected: true,
+      data: {
+        action: { ...nodeData.action },
+        actions: nodeData.actions.map((action) => ({
+          ...action,
+          id: `action-${nextActionId++}`,
+        })),
+        condition: {
+          logic: nodeData.condition.logic,
+          rules: nodeData.condition.rules.map((rule) => ({
+            ...rule,
+            id: `condition-rule-${nextConditionRuleId++}`,
+          })),
+        },
+        images: nodeData.images.map((image) => ({
+          ...image,
+          id: `image-${nextImageId++}`,
+        })),
+        links: nodeData.links.map((link) => ({
+          ...link,
+          id: `link-${nextLinkId++}`,
+        })),
+        nodeType: nodeData.nodeType,
+        options,
+        parameterUpdate: { ...nodeData.parameterUpdate },
+        parameterUpdates: nodeData.parameterUpdates.map((parameterUpdate) => ({
+          ...parameterUpdate,
+          id: `parameter-${nextParameterUpdateId++}`,
+        })),
+        script: nodeData.script,
+        tool: { ...nodeData.tool },
+        tools: nodeData.tools.map((tool) => ({
+          ...tool,
+          id: `tool-${nextToolId++}`,
+        })),
+      },
+    }
+  })
+
+  const edgeDrafts = getInternalSubgraphEdges(sourceEdges, selectedNodeIdSet).flatMap(
+    (edge) => {
+      const source = nodeIdMap.get(edge.source)
+      const target = nodeIdMap.get(edge.target)
+      const sourceHandle = edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID
+      const mappedSourceHandle = isDirectSourceHandle(sourceHandle)
+        ? DIRECT_SOURCE_HANDLE_ID
+        : isConditionSourceHandle(sourceHandle)
+          ? sourceHandle
+          : optionIdMaps.get(edge.source)?.get(sourceHandle)
+
+      if (!source || !target || !mappedSourceHandle) {
+        return []
+      }
+
+      return [
+        {
+          source,
+          sourceHandle: mappedSourceHandle,
+          target,
+        },
+      ]
+    },
+  )
+  const positionedNodes =
+    layoutMode === 'auto'
+      ? (() => {
+          const layoutPositions = createAutoLayoutPositions(
+            clonedNodes.map((node) => ({ id: node.id })),
+            edgeDrafts.map((edge) => ({
+              source: edge.source,
+              target: edge.target,
+            })),
+          )
+
+          return clonedNodes.map((node) => ({
+            ...node,
+            position: layoutPositions[node.id] ?? node.position,
+          }))
+        })()
+      : (() => {
+          const bounds = getNodesBounds(clonedNodes)
+          const offset = bounds
+            ? {
+                x:
+                  (basePosition?.x ?? bounds.minX) +
+                  pasteOffset.x -
+                  bounds.minX,
+                y:
+                  (basePosition?.y ?? bounds.minY) +
+                  pasteOffset.y -
+                  bounds.minY,
+              }
+            : pasteOffset
+
+          return clonedNodes.map((node) => ({
+            ...node,
+            position: {
+              x: node.position.x + offset.x,
+              y: node.position.y + offset.y,
+            },
+          }))
+        })()
+  const clonedNodeDataById = new Map(
+    positionedNodes.map((node) => [node.id, normalizeNodeData(node.data)]),
+  )
+  const clonedEdges = edgeDrafts.flatMap((edge) => {
+    const sourceData = clonedNodeDataById.get(edge.source)
+
+    if (!sourceData) {
+      return []
+    }
+
+    return [
+      createDecisionEdge(
+        getConnectionWithPreferredHandles(
+          {
+            source: edge.source,
+            sourceHandle: edge.sourceHandle,
+            target: edge.target,
+            targetHandle: null,
+          },
+          positionedNodes,
+        ),
+        sourceData,
+      ),
+    ]
+  })
+
+  return {
+    edges: clonedEdges,
+    entryNodeId: nodeIdMap.get(sourceEntryNodeId) ?? '',
+    nodeIdMap,
+    nodes: positionedNodes,
+  }
 }
 
 const getImportedEditorLayout = (editorValue: unknown) => {
@@ -3257,12 +3521,35 @@ function DismissibleNotice({
 function ConfirmDialog({
   dialog,
   onCancel,
-  onConfirm,
+  onSelect,
 }: {
   dialog: ConfirmDialogState
   onCancel: () => void
-  onConfirm: () => void
+  onSelect: (value: DialogActionValue) => void
 }) {
+  const actions =
+    dialog.actions ??
+    ([
+      {
+        label: dialog.confirmLabel ?? 'אישור',
+        value: 'confirm',
+        variant: dialog.variant ?? 'primary',
+      },
+      ...(dialog.cancelLabel
+        ? [
+            {
+              label: dialog.cancelLabel,
+              value: 'cancel' as DialogActionValue,
+              variant: 'secondary' as const,
+            },
+          ]
+        : []),
+    ] satisfies Array<{
+      label: string
+      value: DialogActionValue
+      variant?: 'danger' | 'primary' | 'secondary'
+    }>)
+
   return (
     <div className="flowly-dialog-backdrop" role="presentation">
       <section
@@ -3275,27 +3562,26 @@ function ConfirmDialog({
         <h2 id="flowly-dialog-title">{dialog.title}</h2>
         <p>{dialog.message}</p>
         <div className="flowly-dialog__actions">
-          <button
-            type="button"
-            className={[
-              'flowly-dialog__button',
-              dialog.variant === 'danger' ? 'flowly-dialog__button--danger' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            onClick={onConfirm}
-          >
-            {dialog.confirmLabel}
-          </button>
-          {dialog.cancelLabel ? (
+          {actions.map((action) => (
             <button
+              key={action.value}
               type="button"
-              className="flowly-dialog__button flowly-dialog__button--secondary"
-              onClick={onCancel}
+              className={[
+                'flowly-dialog__button',
+                action.variant === 'danger' ? 'flowly-dialog__button--danger' : '',
+                action.variant === 'secondary'
+                  ? 'flowly-dialog__button--secondary'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() =>
+                action.value === 'cancel' ? onCancel() : onSelect(action.value)
+              }
             >
-              {dialog.cancelLabel}
+              {action.label}
             </button>
-          ) : null}
+          ))}
         </div>
       </section>
     </div>
@@ -3319,9 +3605,17 @@ function App() {
   const nextActionNumber = useRef(1)
   const nextToolNumber = useRef(1)
   const nextConditionRuleNumber = useRef(1)
-  const confirmDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(
-    null,
-  )
+  const confirmDialogResolverRef = useRef<
+    ((choice: DialogActionValue) => void) | null
+  >(null)
+  const nextScenarioTabNumber = useRef(2)
+  const nextPasteOffsetNumber = useRef(0)
+  const [scenarioTabs, setScenarioTabs] = useState<ScenarioTab[]>(() => [
+    createEmptyScenarioTab(initialScenarioTabId, 'תסריט 1'),
+  ])
+  const [activeScenarioTabId, setActiveScenarioTabId] =
+    useState(initialScenarioTabId)
+  const [flowClipboard, setFlowClipboard] = useState<FlowClipboard | null>(null)
   const [scenarioMetadata, setScenarioMetadata] = useState<ScenarioMetadata>(
     initialScenarioMetadata,
   )
@@ -3406,7 +3700,22 @@ function App() {
     [nodes],
   )
   const selectedNodeCount = selectedNodeIds.length
+  const selectedActionNodeIds = useMemo(
+    () =>
+      selectedNodeIds.length > 0
+        ? selectedNodeIds
+        : selectedNodeId
+          ? [selectedNodeId]
+          : [],
+    [selectedNodeId, selectedNodeIds],
+  )
   const isSelectionMode = canvasMode === 'select'
+  const activeScenarioTab = useMemo(
+    () =>
+      scenarioTabs.find((tab) => tab.id === activeScenarioTabId) ??
+      scenarioTabs[0],
+    [activeScenarioTabId, scenarioTabs],
+  )
   const generatedYamlText = useMemo(
     () =>
       createYamlExportText(
@@ -3422,16 +3731,16 @@ function App() {
   const hasValidationErrors = Boolean(validationReport?.errors.length)
   const hasValidationWarnings = Boolean(validationReport?.warnings.length)
 
-  const closeConfirmDialog = useCallback((confirmed: boolean) => {
-    confirmDialogResolverRef.current?.(confirmed)
+  const closeConfirmDialog = useCallback((choice: DialogActionValue) => {
+    confirmDialogResolverRef.current?.(choice)
     confirmDialogResolverRef.current = null
     setConfirmDialog(null)
   }, [])
 
-  const requestConfirmation = useCallback(
+  const requestDialogChoice = useCallback(
     (dialog: ConfirmDialogState) =>
-      new Promise<boolean>((resolve) => {
-        confirmDialogResolverRef.current?.(false)
+      new Promise<DialogActionValue>((resolve) => {
+        confirmDialogResolverRef.current?.('cancel')
         confirmDialogResolverRef.current = resolve
         setConfirmDialog({
           cancelLabel: 'ביטול',
@@ -3440,6 +3749,204 @@ function App() {
         })
       }),
     [],
+  )
+
+  const requestConfirmation = useCallback(
+    async (dialog: ConfirmDialogState) =>
+      (await requestDialogChoice(dialog)) === 'confirm',
+    [requestDialogChoice],
+  )
+
+  const applyEditorCountersForNodes = useCallback((flowNodes: DecisionNode[]) => {
+    const getNextNumberForPrefix = (ids: string[], prefix: string) =>
+      Math.max(
+        0,
+        ...ids.map((id) => {
+          const match = id.match(new RegExp(`^${prefix}-(\\d+)$`))
+
+          return match ? Number(match[1]) : 0
+        }),
+      ) + 1
+    const nodeDataList = flowNodes.map((node) => normalizeNodeData(node.data))
+
+    nextOptionNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) =>
+        nodeData.options.map((option) => option.id),
+      ),
+      'option',
+    )
+    nextImageNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) => nodeData.images.map((image) => image.id)),
+      'image',
+    )
+    nextLinkNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) => nodeData.links.map((link) => link.id)),
+      'link',
+    )
+    nextParameterUpdateNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) =>
+        nodeData.parameterUpdates.map((parameterUpdate) => parameterUpdate.id),
+      ),
+      'parameter',
+    )
+    nextActionNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) =>
+        nodeData.actions.map((action) => action.id),
+      ),
+      'action',
+    )
+    nextToolNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) => nodeData.tools.map((tool) => tool.id)),
+      'tool',
+    )
+    nextConditionRuleNumber.current = getNextNumberForPrefix(
+      nodeDataList.flatMap((nodeData) =>
+        nodeData.condition.rules.map((rule) => rule.id),
+      ),
+      'condition-rule',
+    )
+  }, [])
+
+  const getActiveScenarioSnapshot = useCallback(
+    (tab: ScenarioTab): ScenarioTab => ({
+      ...tab,
+      edgeStyle,
+      edges,
+      editorViewport,
+      isValidationPanelOpen,
+      nodes,
+      scenarioMetadata,
+      selectedEdgeId,
+      selectedNodeId,
+      validationReport,
+    }),
+    [
+      edgeStyle,
+      edges,
+      editorViewport,
+      isValidationPanelOpen,
+      nodes,
+      scenarioMetadata,
+      selectedEdgeId,
+      selectedNodeId,
+      validationReport,
+    ],
+  )
+
+  const syncActiveTabInList = useCallback(
+    (tabs: ScenarioTab[]) =>
+      tabs.map((tab) =>
+        tab.id === activeScenarioTabId ? getActiveScenarioSnapshot(tab) : tab,
+      ),
+    [activeScenarioTabId, getActiveScenarioSnapshot],
+  )
+
+  const loadScenarioTab = useCallback(
+    (tab: ScenarioTab) => {
+      setActiveScenarioTabId(tab.id)
+      setNodes(tab.nodes)
+      setEdges(tab.edges)
+      setScenarioMetadata(tab.scenarioMetadata)
+      setEdgeStyle(tab.edgeStyle)
+      setEditorViewport(tab.editorViewport)
+      setSelectedNodeId(tab.selectedNodeId)
+      setSelectedEdgeId(tab.selectedEdgeId)
+      setValidationReport(tab.validationReport)
+      setIsValidationPanelOpen(tab.isValidationPanelOpen)
+      setIsScenarioPanelOpen(false)
+      setIsYamlImportPanelOpen(false)
+      setIsYamlExportPanelOpen(false)
+      setPendingConnectionPopover(null)
+      setYamlCopyMessage('')
+      setIsDraftExport(false)
+      applyEditorCountersForNodes(tab.nodes)
+
+      window.requestAnimationFrame(() => {
+        void reactFlowInstanceRef.current?.setViewport(tab.editorViewport, {
+          duration: 150,
+        })
+      })
+    },
+    [applyEditorCountersForNodes, setEdges, setNodes],
+  )
+
+  const createScenarioTab = useCallback((name: string) => {
+    const tab = createEmptyScenarioTab(
+      `scenario-tab-${nextScenarioTabNumber.current}`,
+      name,
+    )
+
+    nextScenarioTabNumber.current += 1
+
+    return tab
+  }, [])
+
+  const switchScenarioTab = useCallback(
+    (tabId: string) => {
+      if (tabId === activeScenarioTabId) {
+        return
+      }
+
+      const syncedTabs = syncActiveTabInList(scenarioTabs)
+      const nextTab = syncedTabs.find((tab) => tab.id === tabId)
+
+      if (!nextTab) {
+        return
+      }
+
+      setScenarioTabs(syncedTabs)
+      loadScenarioTab(nextTab)
+    },
+    [activeScenarioTabId, loadScenarioTab, scenarioTabs, syncActiveTabInList],
+  )
+
+  const closeScenarioTab = useCallback(
+    async (tabId: string) => {
+      const syncedTabs = syncActiveTabInList(scenarioTabs)
+      const closedTab = syncedTabs.find((tab) => tab.id === tabId)
+
+      if (!closedTab) {
+        return
+      }
+
+      if (
+        hasScenarioTabContent(closedTab) &&
+        !(await requestConfirmation({
+          title: 'סגירת כרטיסייה',
+          message:
+            'סגירת הכרטיסייה תמחק את העבודה בכרטיסייה הזו מהזיכרון. אם לא ייצאת YAML, העבודה תאבד.',
+          confirmLabel: 'סגור כרטיסייה',
+          variant: 'danger',
+        }))
+      ) {
+        return
+      }
+
+      let nextTabs = syncedTabs.filter((tab) => tab.id !== tabId)
+
+      if (nextTabs.length === 0) {
+        nextTabs = [createScenarioTab('תסריט חדש')]
+      }
+
+      const nextActiveTab =
+        tabId === activeScenarioTabId
+          ? (nextTabs[Math.max(0, syncedTabs.findIndex((tab) => tab.id === tabId) - 1)] ??
+            nextTabs[0])
+          : (nextTabs.find((tab) => tab.id === activeScenarioTabId) ??
+            nextTabs[0])
+
+      setScenarioTabs(nextTabs)
+      loadScenarioTab(nextActiveTab)
+      setAppMessage('הכרטיסייה נסגרה.')
+    },
+    [
+      activeScenarioTabId,
+      createScenarioTab,
+      loadScenarioTab,
+      requestConfirmation,
+      scenarioTabs,
+      syncActiveTabInList,
+    ],
   )
 
   const getCanvasPlacementFromClientPosition = useCallback(
@@ -3878,7 +4385,12 @@ function App() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (nodes.length === 0) {
+      if (
+        nodes.length === 0 &&
+        !scenarioTabs.some(
+          (tab) => tab.id !== activeScenarioTabId && hasScenarioTabContent(tab),
+        )
+      ) {
         return
       }
 
@@ -3889,7 +4401,7 @@ function App() {
     window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [nodes.length])
+  }, [activeScenarioTabId, nodes.length, scenarioTabs])
 
   useEffect(() => {
     if (!confirmDialog) {
@@ -3898,7 +4410,7 @@ function App() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        closeConfirmDialog(false)
+        closeConfirmDialog('cancel')
       }
     }
 
@@ -4363,8 +4875,45 @@ function App() {
 
   const createNewScenario = useCallback(async () => {
     const hasCurrentFlow = nodes.length > 0 || edges.length > 0
+    const newScenarioChoice = await requestDialogChoice({
+      title: 'תסריט חדש',
+      message: 'איך לפתוח את התסריט החדש?',
+      actions: [
+        {
+          label: 'פתח בכרטיסייה חדשה',
+          value: 'newTab',
+          variant: 'primary',
+        },
+        {
+          label: 'החלף את הכרטיסייה הנוכחית',
+          value: 'replaceCurrent',
+          variant: 'danger',
+        },
+        {
+          label: 'ביטול',
+          value: 'cancel',
+          variant: 'secondary',
+        },
+      ],
+    })
+
+    if (newScenarioChoice === 'cancel') {
+      return
+    }
+
+    if (newScenarioChoice === 'newTab') {
+      const syncedTabs = syncActiveTabInList(scenarioTabs)
+      const newTab = createScenarioTab('תסריט חדש')
+
+      setScenarioTabs([...syncedTabs, newTab])
+      loadScenarioTab(newTab)
+      setAppMessage('נפתחה כרטיסייה חדשה.')
+
+      return
+    }
 
     if (
+      newScenarioChoice === 'replaceCurrent' &&
       hasCurrentFlow &&
       !(await requestConfirmation({
         title: 'תסריט חדש',
@@ -4379,7 +4928,7 @@ function App() {
 
     setNodes([])
     setEdges([])
-    setScenarioMetadata(initialScenarioMetadata)
+    setScenarioMetadata({ ...initialScenarioMetadata })
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
     setValidationReport(null)
@@ -4399,17 +4948,33 @@ function App() {
     setAppMessage('נוצר תסריט חדש. יש לייצא YAML כדי לשמור את העבודה.')
     setEdgeStyle(DEFAULT_EDGE_STYLE)
     setEditorViewport(initialViewport)
-
-    nextOptionNumber.current = 1
-    nextImageNumber.current = 1
-    nextLinkNumber.current = 1
-    nextParameterUpdateNumber.current = 1
-    nextActionNumber.current = 1
-    nextToolNumber.current = 1
-    nextConditionRuleNumber.current = 1
+    setScenarioTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.id === activeScenarioTabId
+          ? {
+              ...tab,
+              name: 'תסריט חדש',
+            }
+          : tab,
+      ),
+    )
+    applyEditorCountersForNodes([])
 
     void reactFlowInstanceRef.current?.setViewport(initialViewport, { duration: 250 })
-  }, [edges.length, nodes.length, requestConfirmation, setEdges, setNodes])
+  }, [
+    activeScenarioTabId,
+    applyEditorCountersForNodes,
+    createScenarioTab,
+    edges.length,
+    loadScenarioTab,
+    nodes.length,
+    requestConfirmation,
+    requestDialogChoice,
+    scenarioTabs,
+    setEdges,
+    setNodes,
+    syncActiveTabInList,
+  ])
 
   const openYamlExportPanelWithoutValidation = useCallback((exportAsDraft = false) => {
     setYamlCopyMessage('')
@@ -4964,6 +5529,172 @@ function App() {
     setNodes,
   ])
 
+  const copySelectedSteps = useCallback(() => {
+    if (selectedActionNodeIds.length === 0) {
+      setAppMessage('יש לבחור שלבים להעתקה.')
+
+      return
+    }
+
+    const selectedNodeIdSet = new Set(selectedActionNodeIds)
+    const clipboardNodes = nodes
+      .filter((node) => selectedNodeIdSet.has(node.id))
+      .map((node) => ({
+        ...node,
+        data: cloneNodeDataPreservingIds(normalizeNodeData(node.data)),
+        selected: false,
+      }))
+    const clipboardEdges = getInternalSubgraphEdges(edges, selectedNodeIdSet).map(
+      (edge) => ({
+        ...edge,
+        animated: false,
+        data: {},
+        selected: false,
+      }),
+    )
+
+    setFlowClipboard({
+      edges: clipboardEdges,
+      entryNodeId: selectedNodeIdSet.has(scenarioMetadata.entryNodeId)
+        ? scenarioMetadata.entryNodeId
+        : '',
+      nodes: clipboardNodes,
+    })
+    setAppMessage('השלבים הועתקו')
+  }, [edges, nodes, scenarioMetadata.entryNodeId, selectedActionNodeIds])
+
+  const pasteClipboardSteps = useCallback(() => {
+    if (!flowClipboard || flowClipboard.nodes.length === 0) {
+      setAppMessage('אין שלבים להדבקה.')
+
+      return
+    }
+
+    const pasteOffset = (nextPasteOffsetNumber.current % 6) * 28
+    const visibleCenter = getVisibleCanvasCenterPosition()
+    const clonedSubgraph = cloneSubgraphWithNewIds({
+      basePosition: {
+        x: visibleCenter.x - nodeLayoutWidth / 2,
+        y: visibleCenter.y - nodeLayoutHeight / 2,
+      },
+      layoutMode: 'viewport',
+      pasteOffset: { x: pasteOffset, y: pasteOffset },
+      reservedNodeIds: nodes.map((node) => node.id),
+      sourceEdges: flowClipboard.edges,
+      sourceEntryNodeId: flowClipboard.entryNodeId,
+      sourceNodeIds: flowClipboard.nodes.map((node) => node.id),
+      sourceNodes: flowClipboard.nodes,
+    })
+    const nextNodes = [
+      ...nodes.map((node) => ({ ...node, selected: false })),
+      ...clonedSubgraph.nodes,
+    ]
+    const pastedEntryNodeId =
+      clonedSubgraph.entryNodeId ||
+      (nodes.length === 0 && clonedSubgraph.nodes.length === 1
+        ? clonedSubgraph.nodes[0].id
+        : '')
+    const nextEntryNodeId =
+      scenarioMetadata.entryNodeId ||
+      (nodes.length === 0 ? pastedEntryNodeId : '')
+    const nextEdges = normalizeEdgesForNodes(
+      [...edges, ...clonedSubgraph.edges],
+      nextNodes,
+      nextEntryNodeId,
+    )
+
+    setNodes(nextNodes)
+    setEdges(nextEdges)
+    setSelectedNodeId(clonedSubgraph.nodes[0]?.id ?? null)
+    setSelectedEdgeId(null)
+
+    if (!scenarioMetadata.entryNodeId && nextEntryNodeId) {
+      setScenarioMetadata((currentMetadata) => ({
+        ...currentMetadata,
+        entryNodeId: nextEntryNodeId,
+      }))
+    }
+
+    nextPasteOffsetNumber.current += 1
+    applyEditorCountersForNodes(nextNodes)
+    setAppMessage('השלבים הודבקו')
+  }, [
+    applyEditorCountersForNodes,
+    edges,
+    flowClipboard,
+    getVisibleCanvasCenterPosition,
+    nodes,
+    scenarioMetadata.entryNodeId,
+    setEdges,
+    setNodes,
+  ])
+
+  const splitSelectedStepsToNewTab = useCallback(async () => {
+    if (selectedActionNodeIds.length === 0) {
+      setAppMessage('יש לבחור שלבים לפיצול')
+
+      return
+    }
+
+    const shouldSplit = await requestConfirmation({
+      title: 'פיצול תסריט',
+      message:
+        'יווצר תסריט חדש בכרטיסייה חדשה מהשלבים שנבחרו. התסריט המקורי לא יימחק.',
+      confirmLabel: 'פצל לתסריט חדש',
+      variant: 'primary',
+    })
+
+    if (!shouldSplit) {
+      return
+    }
+
+    const clonedSubgraph = cloneSubgraphWithNewIds({
+      layoutMode: 'auto',
+      reservedNodeIds: [],
+      sourceEdges: edges,
+      sourceEntryNodeId: scenarioMetadata.entryNodeId,
+      sourceNodeIds: selectedActionNodeIds,
+      sourceNodes: nodes,
+    })
+    const splitTab = {
+      ...createScenarioTab('פיצול מתסריט'),
+      edgeStyle,
+      edges: clonedSubgraph.edges,
+      editorViewport: initialViewport,
+      nodes: clonedSubgraph.nodes,
+      scenarioMetadata: {
+        ...initialScenarioMetadata,
+        entryNodeId: clonedSubgraph.entryNodeId,
+        scenarioDescription: `פוצל מתוך ${activeScenarioTab?.name ?? 'תסריט'}`,
+      },
+      selectedNodeId: clonedSubgraph.nodes[0]?.id ?? null,
+    }
+    const syncedTabs = syncActiveTabInList(scenarioTabs)
+
+    setScenarioTabs([...syncedTabs, splitTab])
+    loadScenarioTab(splitTab)
+    setAppMessage('נפתחה כרטיסיית פיצול חדשה.')
+
+    window.requestAnimationFrame(() => {
+      void reactFlowInstanceRef.current?.fitView({
+        duration: 250,
+        padding: 0.18,
+      })
+    })
+  }, [
+    activeScenarioTab?.name,
+    createScenarioTab,
+    edgeStyle,
+    edges,
+    loadScenarioTab,
+    nodes,
+    requestConfirmation,
+    scenarioMetadata.entryNodeId,
+    scenarioTabs,
+    selectedActionNodeIds,
+    syncActiveTabInList,
+  ])
+
   const duplicateSelectedNodes = useCallback(() => {
     if (selectedNodeIds.length === 0) {
       return
@@ -5150,6 +5881,38 @@ function App() {
 
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [deleteSelectedNode, selectedNode])
+
+  useEffect(() => {
+    const handleClipboardKeyDown = (event: KeyboardEvent) => {
+      if (
+        isEditableElement(event.target) ||
+        (!event.metaKey && !event.ctrlKey)
+      ) {
+        return
+      }
+
+      const normalizedKey = event.key.toLowerCase()
+
+      if (normalizedKey === 'c' && selectedActionNodeIds.length > 0) {
+        event.preventDefault()
+        copySelectedSteps()
+      }
+
+      if (normalizedKey === 'v' && flowClipboard) {
+        event.preventDefault()
+        pasteClipboardSteps()
+      }
+    }
+
+    window.addEventListener('keydown', handleClipboardKeyDown)
+
+    return () => window.removeEventListener('keydown', handleClipboardKeyDown)
+  }, [
+    copySelectedSteps,
+    flowClipboard,
+    pasteClipboardSteps,
+    selectedActionNodeIds.length,
+  ])
 
   const createConnectedNodeFromPopover = useCallback(
     (nodeType: DecisionNodeType) => {
@@ -5407,6 +6170,30 @@ function App() {
         >
           סדר כרטיסיות
         </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          disabled={!flowClipboard}
+          onClick={pasteClipboardSteps}
+        >
+          הדבק
+        </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          disabled={selectedActionNodeIds.length === 0}
+          onClick={copySelectedSteps}
+        >
+          העתק
+        </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          disabled={selectedActionNodeIds.length === 0}
+          onClick={splitSelectedStepsToNewTab}
+        >
+          פצל לתסריט חדש
+        </button>
 
         <div className="canvas-mode-toggle" role="group" aria-label="מצב קנבס">
           {(['pan', 'select'] as const).map((mode) => (
@@ -5444,6 +6231,53 @@ function App() {
           </select>
         </label>
       </header>
+
+      <nav className="scenario-tabs" aria-label="כרטיסיות תסריט">
+        {scenarioTabs.map((tab) => {
+          const isActiveTab = tab.id === activeScenarioTabId
+          const tabHasContent = isActiveTab
+            ? nodes.length > 0 || edges.length > 0
+            : hasScenarioTabContent(tab)
+
+          return (
+            <div
+              key={tab.id}
+              className={[
+                'scenario-tabs__item',
+                isActiveTab ? 'scenario-tabs__item--active' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <button
+                type="button"
+                className="scenario-tabs__tab-button"
+                aria-current={isActiveTab ? 'page' : undefined}
+                onClick={() => switchScenarioTab(tab.id)}
+              >
+                <span>{tab.name}</span>
+                {tabHasContent ? (
+                  <span
+                    className="scenario-tabs__content-dot"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="scenario-tabs__close-button"
+                aria-label={`סגור ${tab.name}`}
+                title="סגור כרטיסייה"
+                onClick={() => {
+                  void closeScenarioTab(tab.id)
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )
+        })}
+      </nav>
 
       <div className="workspace-shell">
         <aside className="sidebar" aria-label="סרגל הוספת צמתים">
@@ -6007,6 +6841,22 @@ function App() {
           proOptions={{ hideAttribution: true }}
         >
           <Background color="#c7d2fe" gap={28} variant={BackgroundVariant.Dots} />
+          <MiniMap
+            className="flow-minimap"
+            position="bottom-right"
+            pannable
+            zoomable
+            maskColor="rgba(15, 23, 42, 0.12)"
+            nodeColor={(node) => {
+              const nodeData = normalizeNodeData(node.data)
+
+              if (node.id === scenarioMetadata.entryNodeId) {
+                return '#facc15'
+              }
+
+              return isInternalNodeType(nodeData.nodeType) ? '#0f766e' : '#2563eb'
+            }}
+          />
           <Controls position="bottom-left" />
         </ReactFlow>
 
@@ -6053,6 +6903,12 @@ function App() {
             }`}</strong>
             <button type="button" onClick={duplicateSelectedNodes}>
               שכפל נבחרים
+            </button>
+            <button type="button" onClick={copySelectedSteps}>
+              העתק
+            </button>
+            <button type="button" onClick={splitSelectedStepsToNewTab}>
+              פצל לתסריט חדש
             </button>
             <button
               type="button"
@@ -6468,8 +7324,8 @@ function App() {
       {confirmDialog ? (
         <ConfirmDialog
           dialog={confirmDialog}
-          onCancel={() => closeConfirmDialog(false)}
-          onConfirm={() => closeConfirmDialog(true)}
+          onCancel={() => closeConfirmDialog('cancel')}
+          onSelect={closeConfirmDialog}
         />
       ) : null}
     </main>

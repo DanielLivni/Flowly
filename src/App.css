@@ -88,6 +88,88 @@
   background: #eaf1ff;
 }
 
+.top-toolbar__button:disabled {
+  border-color: #dbe3ef;
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.scenario-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 18px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid #dbe3ef;
+  background: #ffffff;
+}
+
+.scenario-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #c9d3e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.scenario-tabs__item--active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #173d9a;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.12);
+}
+
+.scenario-tabs__tab-button,
+.scenario-tabs__close-button {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.scenario-tabs__tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 180px;
+  padding: 6px 11px;
+}
+
+.scenario-tabs__tab-button span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-tabs__content-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #0f766e;
+}
+
+.scenario-tabs__close-button {
+  display: grid;
+  width: 30px;
+  place-items: center;
+  border-right: 1px solid rgba(148, 163, 184, 0.35);
+  color: #64748b;
+}
+
+.scenario-tabs__close-button:hover,
+.scenario-tabs__close-button:focus-visible {
+  background: #fff1f2;
+  color: #b42318;
+}
+
 .canvas-mode-toggle {
   display: inline-flex;
   align-items: center;
@@ -509,6 +591,21 @@
   border-radius: 7px;
   overflow: hidden;
   box-shadow: 0 12px 28px rgba(23, 32, 51, 0.12);
+}
+
+.react-flow__minimap.flow-minimap {
+  width: 176px;
+  height: 124px;
+  border: 1px solid #c9d3e1;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+}
+
+.react-flow__minimap.flow-minimap:hover {
+  width: 218px;
+  height: 154px;
 }
 
 .react-flow__edge.decision-edge .react-flow__edge-path {
