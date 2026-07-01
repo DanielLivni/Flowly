@@ -86,6 +86,7 @@ type TargetHandleId =
 type DecisionOption = {
   id: string
   label: string
+  next?: string
 }
 
 type DecisionImage = {
@@ -415,7 +416,7 @@ type ConfirmDialogState = {
   variant?: 'danger' | 'primary'
 }
 
-type DialogActionValue = 'confirm' | 'cancel' | 'newTab' | 'replaceCurrent'
+type DialogActionValue = string
 
 type ScenarioTab = {
   edgeStyle: EdgeStyle
@@ -553,6 +554,23 @@ const getNextStepId = (stepIds: Iterable<string>) =>
 const getStepReferencesFromText = (text: string) => [
   ...new Set(text.match(stepReferencePattern) ?? []),
 ]
+
+const getStepNumberFromId = (stepId: string) => {
+  const stepIdMatch = stepId.match(stepIdPattern)
+
+  return stepIdMatch ? Number(stepIdMatch[1]) : Number.POSITIVE_INFINITY
+}
+
+const getFirstScenarioNode = (nodes: DecisionNode[]) =>
+  nodes.reduce<DecisionNode | null>((firstNode, node) => {
+    if (!firstNode) {
+      return node
+    }
+
+    return getStepNumberFromId(node.id) < getStepNumberFromId(firstNode.id)
+      ? node
+      : firstNode
+  }, null)
 
 const DIRECT_SOURCE_HANDLE_ID = 'out'
 const DIRECT_EDGE_LABEL = 'המשך'
@@ -716,7 +734,11 @@ const normalizeOptions = (
   (options ?? []).map((option, optionIndex) =>
     typeof option === 'string'
       ? { id: `option-${optionIndex + 1}`, label: option }
-      : option,
+      : {
+          id: option.id,
+          label: option.label,
+          next: option.next,
+        },
   )
 
 const normalizeParameterUpdates = (
@@ -1736,6 +1758,60 @@ const getInternalSubgraphEdges = (
       selectedNodeIdSet.has(edge.source) && selectedNodeIdSet.has(edge.target),
   )
 
+const getReachableTreeNodeIds = (
+  nodes: DecisionNode[],
+  edges: DecisionEdge[],
+  startNodeId: string,
+  initialSourceHandles?: string[],
+) => {
+  const reachableNodeIds = new Set([startNodeId])
+  const queuedNodeIds: string[] = []
+  const enqueueTargets = (sourceId: string, sourceHandles?: string[]) => {
+    const sourceData = getNodeDataById(nodes, sourceId)
+
+    if (!sourceData || isTerminalNodeType(sourceData.nodeType)) {
+      return
+    }
+
+    const allowedSourceHandles = sourceHandles
+      ? new Set(
+          sourceHandles.map((sourceHandle) =>
+            isDirectSourceHandle(sourceHandle)
+              ? DIRECT_SOURCE_HANDLE_ID
+              : sourceHandle,
+          ),
+        )
+      : null
+
+    edges.forEach((edge) => {
+      const sourceHandle = edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID
+
+      if (
+        edge.source !== sourceId ||
+        (allowedSourceHandles && !allowedSourceHandles.has(sourceHandle)) ||
+        reachableNodeIds.has(edge.target)
+      ) {
+        return
+      }
+
+      reachableNodeIds.add(edge.target)
+      queuedNodeIds.push(edge.target)
+    })
+  }
+
+  enqueueTargets(startNodeId, initialSourceHandles)
+
+  while (queuedNodeIds.length > 0) {
+    const nextNodeId = queuedNodeIds.shift()
+
+    if (nextNodeId) {
+      enqueueTargets(nextNodeId)
+    }
+  }
+
+  return reachableNodeIds
+}
+
 const cloneSubgraphWithNewIds = ({
   basePosition,
   layoutMode,
@@ -1760,6 +1836,7 @@ const cloneSubgraphWithNewIds = ({
   const reservedIds = new Set(reservedNodeIds)
   const nodeIdMap = new Map<string, string>()
   const optionIdMaps = new Map<string, Map<string, string>>()
+  const internalTargetBySourceHandle = new Map<string, string>()
   let nextOptionId = 1
   let nextImageId = 1
   let nextLinkId = 1
@@ -1768,22 +1845,43 @@ const cloneSubgraphWithNewIds = ({
   let nextToolId = 1
   let nextConditionRuleId = 1
 
-  const clonedNodes: DecisionNode[] = selectedNodes.map((node) => {
+  selectedNodes.forEach((node) => {
     const nodeData = normalizeNodeData(node.data)
     const nextNodeId = getNextStepId(reservedIds)
     const optionIdMap = new Map<string, string>()
-    const options = nodeData.options.map((option) => {
+
+    nodeData.options.forEach((option) => {
       const optionId = `option-${nextOptionId}`
 
       nextOptionId += 1
       optionIdMap.set(option.id, optionId)
-
-      return { ...option, id: optionId }
     })
 
     nodeIdMap.set(node.id, nextNodeId)
     optionIdMaps.set(node.id, optionIdMap)
     reservedIds.add(nextNodeId)
+  })
+
+  getInternalSubgraphEdges(sourceEdges, selectedNodeIdSet).forEach((edge) => {
+    const sourceHandle = edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID
+
+    internalTargetBySourceHandle.set(`${edge.source}:${sourceHandle}`, edge.target)
+  })
+
+  const clonedNodes: DecisionNode[] = selectedNodes.map((node) => {
+    const nodeData = normalizeNodeData(node.data)
+    const nextNodeId = nodeIdMap.get(node.id) ?? node.id
+    const optionIdMap = optionIdMaps.get(node.id) ?? new Map<string, string>()
+    const options = nodeData.options.map((option) => {
+      const oldTargetId = internalTargetBySourceHandle.get(`${node.id}:${option.id}`)
+      const remappedTargetId = oldTargetId ? nodeIdMap.get(oldTargetId) : undefined
+
+      return {
+        ...option,
+        id: optionIdMap.get(option.id) ?? option.id,
+        next: remappedTargetId,
+      }
+    })
 
     return {
       ...node,
@@ -1828,8 +1926,14 @@ const cloneSubgraphWithNewIds = ({
     }
   })
 
-  const edgeDrafts = getInternalSubgraphEdges(sourceEdges, selectedNodeIdSet).flatMap(
-    (edge) => {
+  const edgeDrafts = Array.from(internalTargetBySourceHandle.entries()).flatMap(
+    ([sourceKey, targetId]) => {
+      const sourceHandleSeparatorIndex = sourceKey.indexOf(':')
+      const edge = {
+        source: sourceKey.slice(0, sourceHandleSeparatorIndex),
+        sourceHandle: sourceKey.slice(sourceHandleSeparatorIndex + 1),
+        target: targetId,
+      }
       const source = nodeIdMap.get(edge.source)
       const target = nodeIdMap.get(edge.target)
       const sourceHandle = edge.sourceHandle ?? DIRECT_SOURCE_HANDLE_ID
@@ -6092,6 +6196,164 @@ function App() {
     [edges, getCanvasPlacementFromClientPosition, nodes],
   )
 
+  const focusStartStep = useCallback(() => {
+    if (nodes.length === 0) {
+      setAppMessage('אין שלבים בתסריט')
+
+      return
+    }
+
+    const entryNode = scenarioMetadata.entryNodeId
+      ? nodes.find((node) => node.id === scenarioMetadata.entryNodeId)
+      : null
+    const fallbackNode = getFirstScenarioNode(nodes)
+    const targetNode = entryNode ?? fallbackNode
+
+    if (!targetNode) {
+      setAppMessage('אין שלבים בתסריט')
+
+      return
+    }
+
+    const nodeWidth =
+      typeof targetNode.width === 'number' ? targetNode.width : nodeLayoutWidth
+    const nodeHeight =
+      typeof targetNode.height === 'number' ? targetNode.height : nodeLayoutHeight
+
+    void reactFlowInstanceRef.current?.setCenter(
+      targetNode.position.x + nodeWidth / 2,
+      targetNode.position.y + nodeHeight / 2,
+      {
+        duration: 350,
+        zoom: 0.95,
+      },
+    )
+
+    if (!entryNode) {
+      setAppMessage('לא הוגדר שלב התחלתי, עברנו לשלב הראשון בתסריט')
+    }
+  }, [nodes, scenarioMetadata.entryNodeId])
+
+  const selectTreeFromNode = useCallback(async () => {
+    if (selectedActionNodeIds.length !== 1) {
+      setAppMessage('יש לבחור שלב אחד כדי לבחור עץ')
+
+      return
+    }
+
+    const sourceNodeId = selectedActionNodeIds[0]
+    const sourceNode = nodes.find((node) => node.id === sourceNodeId)
+
+    if (!sourceNode) {
+      return
+    }
+
+    const sourceData = normalizeNodeData(sourceNode.data)
+    let sourceHandles: string[] = []
+    let shouldWarnNoConnectedContinuation = false
+
+    if (sourceData.nodeType === 'condition') {
+      const treeChoice = await requestDialogChoice({
+        title: 'בחירת עץ',
+        message: 'מאיזה מסלול להתחיל את בחירת העץ?',
+        actions: [
+          {
+            label: 'כל המסלולים',
+            value: 'tree-all-condition',
+            variant: 'primary',
+          },
+          {
+            label: 'מתקיים',
+            value: CONDITION_THEN_HANDLE_ID,
+            variant: 'secondary',
+          },
+          {
+            label: 'לא מתקיים',
+            value: CONDITION_ELSE_HANDLE_ID,
+            variant: 'secondary',
+          },
+          {
+            label: 'ביטול',
+            value: 'cancel',
+            variant: 'secondary',
+          },
+        ],
+      })
+
+      if (treeChoice === 'cancel') {
+        return
+      }
+
+      sourceHandles =
+        treeChoice === 'tree-all-condition'
+          ? [CONDITION_THEN_HANDLE_ID, CONDITION_ELSE_HANDLE_ID]
+          : [treeChoice]
+      shouldWarnNoConnectedContinuation = treeChoice !== 'tree-all-condition'
+    } else if (sourceData.options.length > 0) {
+      const treeChoice = await requestDialogChoice({
+        title: 'בחירת עץ',
+        message: 'מאיזו אפשרות להתחיל את בחירת העץ?',
+        actions: [
+          {
+            label: 'כל האפשרויות',
+            value: 'tree-all-options',
+            variant: 'primary',
+          },
+          ...sourceData.options.map((option) => ({
+            label: option.label.trim() || 'אפשרות ללא טקסט',
+            value: option.id,
+            variant: 'secondary' as const,
+          })),
+          {
+            label: 'ביטול',
+            value: 'cancel',
+            variant: 'secondary',
+          },
+        ],
+      })
+
+      if (treeChoice === 'cancel') {
+        return
+      }
+
+      sourceHandles =
+        treeChoice === 'tree-all-options'
+          ? sourceData.options.map((option) => option.id)
+          : [treeChoice]
+      shouldWarnNoConnectedContinuation = treeChoice !== 'tree-all-options'
+    } else if (!isTerminalNodeType(sourceData.nodeType)) {
+      sourceHandles = [DIRECT_SOURCE_HANDLE_ID]
+      shouldWarnNoConnectedContinuation = true
+    }
+
+    const reachableNodeIds = getReachableTreeNodeIds(
+      nodes,
+      edges,
+      sourceNodeId,
+      sourceHandles,
+    )
+
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => ({
+        ...node,
+        selected: reachableNodeIds.has(node.id),
+      })),
+    )
+    setSelectedNodeId(sourceNodeId)
+    setSelectedEdgeId(null)
+    setAppMessage(
+      shouldWarnNoConnectedContinuation && reachableNodeIds.size === 1
+        ? 'לא נמצא המשך מחובר לאפשרות שנבחרה'
+        : `נבחרו ${reachableNodeIds.size} שלבים בעץ`,
+    )
+  }, [
+    edges,
+    nodes,
+    requestDialogChoice,
+    selectedActionNodeIds,
+    setNodes,
+  ])
+
   const arrangeCurrentNodes = useCallback(() => {
     if (nodes.length === 0) {
       setAppMessage('אין כרטיסיות לסידור.')
@@ -6169,6 +6431,21 @@ function App() {
           onClick={arrangeCurrentNodes}
         >
           סדר כרטיסיות
+        </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          onClick={focusStartStep}
+        >
+          לשלב ההתחלתי
+        </button>
+        <button
+          type="button"
+          className="top-toolbar__button"
+          disabled={selectedActionNodeIds.length !== 1}
+          onClick={selectTreeFromNode}
+        >
+          בחר עץ
         </button>
         <button
           type="button"
