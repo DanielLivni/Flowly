@@ -389,6 +389,7 @@ type PendingConnectionPopover = {
 }
 
 type DismissibleNoticeProps = {
+  autoDismissMs?: number
   children: string
   className: string
   onDismiss: () => void
@@ -632,6 +633,14 @@ const createEmptyScenarioTab = (id: string, name: string): ScenarioTab => ({
 
 const hasScenarioTabContent = (tab: Pick<ScenarioTab, 'edges' | 'nodes'>) =>
   tab.nodes.length > 0 || tab.edges.length > 0
+
+const getScenarioDisplayName = (
+  metadata: ScenarioMetadata,
+  fallbackName = 'תסריט חדש',
+) =>
+  metadata.glassixKnowledgeItemName.trim() ||
+  metadata.searchoItemName.trim() ||
+  fallbackName
 
 const internalNodeTypes = new Set<DecisionNodeType>([
   'agentInstruction',
@@ -1812,6 +1821,76 @@ const getReachableTreeNodeIds = (
   return reachableNodeIds
 }
 
+const getSplitOrderedNodeIds = (
+  nodes: DecisionNode[],
+  edges: DecisionEdge[],
+  selectedNodeIds: string[],
+  rootNodeId: string,
+) => {
+  const selectedNodeIdSet = new Set(selectedNodeIds)
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const nodeIndexById = new Map(nodes.map((node, index) => [node.id, index]))
+  const visitedNodeIds = new Set<string>()
+  const orderedNodeIds: string[] = []
+
+  const visitNode = (nodeId: string) => {
+    if (!selectedNodeIdSet.has(nodeId) || visitedNodeIds.has(nodeId)) {
+      return
+    }
+
+    const node = nodeById.get(nodeId)
+
+    if (!node) {
+      return
+    }
+
+    visitedNodeIds.add(nodeId)
+    orderedNodeIds.push(nodeId)
+
+    const nodeData = normalizeNodeData(node.data)
+
+    if (isTerminalNodeType(nodeData.nodeType)) {
+      return
+    }
+
+    const orderedSourceHandles =
+      nodeData.nodeType === 'condition'
+        ? [CONDITION_THEN_HANDLE_ID, CONDITION_ELSE_HANDLE_ID]
+        : supportsOptions(nodeData.nodeType) && nodeData.options.length > 0
+          ? nodeData.options.map((option) => option.id)
+          : [DIRECT_SOURCE_HANDLE_ID]
+
+    orderedSourceHandles.forEach((sourceHandle) => {
+      const outgoingEdge = getOutgoingEdgeForHandle(edges, nodeId, sourceHandle)
+
+      if (outgoingEdge && selectedNodeIdSet.has(outgoingEdge.target)) {
+        visitNode(outgoingEdge.target)
+      }
+    })
+  }
+
+  visitNode(rootNodeId)
+
+  nodes
+    .filter((node) => selectedNodeIdSet.has(node.id) && !visitedNodeIds.has(node.id))
+    .sort((firstNode, secondNode) => {
+      const firstStepNumber = getStepNumberFromId(firstNode.id)
+      const secondStepNumber = getStepNumberFromId(secondNode.id)
+
+      if (firstStepNumber !== secondStepNumber) {
+        return firstStepNumber - secondStepNumber
+      }
+
+      return (
+        (nodeIndexById.get(firstNode.id) ?? 0) -
+        (nodeIndexById.get(secondNode.id) ?? 0)
+      )
+    })
+    .forEach((node) => orderedNodeIds.push(node.id))
+
+  return orderedNodeIds
+}
+
 const cloneSubgraphWithNewIds = ({
   basePosition,
   layoutMode,
@@ -1831,8 +1910,13 @@ const cloneSubgraphWithNewIds = ({
   sourceNodeIds: string[]
   sourceNodes: DecisionNode[]
 }) => {
-  const selectedNodeIdSet = new Set(sourceNodeIds)
-  const selectedNodes = sourceNodes.filter((node) => selectedNodeIdSet.has(node.id))
+  const sourceNodeById = new Map(sourceNodes.map((node) => [node.id, node]))
+  const selectedNodes = Array.from(new Set(sourceNodeIds)).flatMap((nodeId) => {
+    const node = sourceNodeById.get(nodeId)
+
+    return node ? [node] : []
+  })
+  const selectedNodeIdSet = new Set(selectedNodes.map((node) => node.id))
   const reservedIds = new Set(reservedNodeIds)
   const nodeIdMap = new Map<string, string>()
   const optionIdMaps = new Map<string, Map<string, string>>()
@@ -3602,10 +3686,30 @@ const edgeTypes: EdgeTypes = {
 }
 
 function DismissibleNotice({
+  autoDismissMs,
   children,
   className,
   onDismiss,
 }: DismissibleNoticeProps) {
+  const onDismissRef = useRef(onDismiss)
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss
+  }, [onDismiss])
+
+  useEffect(() => {
+    if (!autoDismissMs) {
+      return
+    }
+
+    const dismissTimer = window.setTimeout(
+      () => onDismissRef.current(),
+      autoDismissMs,
+    )
+
+    return () => window.clearTimeout(dismissTimer)
+  }, [autoDismissMs, children])
+
   return (
     <div className={className} role="status">
       <span>{children}</span>
@@ -3747,6 +3851,8 @@ function App() {
   const [yamlCopyMessage, setYamlCopyMessage] = useState('')
   const [isDraftExport, setIsDraftExport] = useState(false)
   const [appMessage, setAppMessage] = useState('')
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
+  const [tabNameDraft, setTabNameDraft] = useState('')
   const [isAutosaveNoticeDismissed, setIsAutosaveNoticeDismissed] = useState(false)
   const [expandedAddStepsForNodeId, setExpandedAddStepsForNodeId] = useState<
     string | null
@@ -3755,6 +3861,9 @@ function App() {
     useState<PendingConnectionPopover | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [lastTreeSelectionRootId, setLastTreeSelectionRootId] = useState<
+    string | null
+  >(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<DecisionNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<DecisionEdge>([])
 
@@ -3819,6 +3928,14 @@ function App() {
       scenarioTabs.find((tab) => tab.id === activeScenarioTabId) ??
       scenarioTabs[0],
     [activeScenarioTabId, scenarioTabs],
+  )
+  const activeScenarioDisplayName = useMemo(
+    () =>
+      getScenarioDisplayName(
+        scenarioMetadata,
+        activeScenarioTab?.name ?? 'תסריט חדש',
+      ),
+    [activeScenarioTab?.name, scenarioMetadata],
   )
   const generatedYamlText = useMemo(
     () =>
@@ -3963,6 +4080,8 @@ function App() {
       setPendingConnectionPopover(null)
       setYamlCopyMessage('')
       setIsDraftExport(false)
+      setRenamingTabId(null)
+      setLastTreeSelectionRootId(null)
       applyEditorCountersForNodes(tab.nodes)
 
       window.requestAnimationFrame(() => {
@@ -4053,6 +4172,58 @@ function App() {
     ],
   )
 
+  const startRenamingScenarioTab = useCallback(
+    (tab: ScenarioTab) => {
+      const tabMetadata =
+        tab.id === activeScenarioTabId ? scenarioMetadata : tab.scenarioMetadata
+
+      setRenamingTabId(tab.id)
+      setTabNameDraft(getScenarioDisplayName(tabMetadata, tab.name))
+    },
+    [activeScenarioTabId, scenarioMetadata],
+  )
+
+  const cancelRenamingScenarioTab = useCallback(() => {
+    setRenamingTabId(null)
+    setTabNameDraft('')
+  }, [])
+
+  const commitScenarioTabRename = useCallback(
+    (tab: ScenarioTab) => {
+      const nextName = tabNameDraft.trim()
+
+      if (!nextName) {
+        cancelRenamingScenarioTab()
+
+        return
+      }
+
+      if (tab.id === activeScenarioTabId) {
+        setScenarioMetadata((currentMetadata) => ({
+          ...currentMetadata,
+          glassixKnowledgeItemName: nextName,
+        }))
+      }
+
+      setScenarioTabs((currentTabs) =>
+        currentTabs.map((currentTab) =>
+          currentTab.id === tab.id
+            ? {
+                ...currentTab,
+                name: nextName,
+                scenarioMetadata: {
+                  ...currentTab.scenarioMetadata,
+                  glassixKnowledgeItemName: nextName,
+                },
+              }
+            : currentTab,
+        ),
+      )
+      cancelRenamingScenarioTab()
+    },
+    [activeScenarioTabId, cancelRenamingScenarioTab, tabNameDraft],
+  )
+
   const getCanvasPlacementFromClientPosition = useCallback(
     (clientPosition: XYPosition) => {
       const canvasBounds = canvasPanelRef.current?.getBoundingClientRect()
@@ -4139,6 +4310,7 @@ function App() {
 
   const toggleNodeMultiSelection = useCallback(
     (nodeId: string, isSelected: boolean) => {
+      setLastTreeSelectionRootId(null)
       setNodes((currentNodes) =>
         currentNodes.map((node) =>
           node.id === nodeId ? { ...node, selected: isSelected } : node,
@@ -4574,6 +4746,9 @@ function App() {
       setScenarioMetadata(importedFlow.scenarioMetadata)
       setSelectedNodeId(null)
       setSelectedEdgeId(null)
+      setLastTreeSelectionRootId(null)
+      setRenamingTabId(null)
+      setTabNameDraft('')
       setValidationReport(null)
       setIsValidationPanelOpen(false)
       setIsYamlExportPanelOpen(false)
@@ -4589,6 +4764,20 @@ function App() {
       setIsDraftExport(false)
       setPendingConnectionPopover(null)
       setAppMessage('התסריט יובא בהצלחה')
+      setScenarioTabs((currentTabs) =>
+        currentTabs.map((tab) =>
+          tab.id === activeScenarioTabId
+            ? {
+                ...tab,
+                name: getScenarioDisplayName(
+                  importedFlow.scenarioMetadata,
+                  'תסריט חדש',
+                ),
+                scenarioMetadata: importedFlow.scenarioMetadata,
+              }
+            : tab,
+        ),
+      )
 
       nextOptionNumber.current = importedFlow.nextOptionNumber
       nextImageNumber.current = importedFlow.nextImageNumber
@@ -4616,7 +4805,7 @@ function App() {
         }
       })
     },
-    [setEdges, setNodes],
+    [activeScenarioTabId, setEdges, setNodes],
   )
 
   const applyAppendedFlow = useCallback(
@@ -5035,6 +5224,9 @@ function App() {
     setScenarioMetadata({ ...initialScenarioMetadata })
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
+    setLastTreeSelectionRootId(null)
+    setRenamingTabId(null)
+    setTabNameDraft('')
     setValidationReport(null)
     setIsValidationPanelOpen(false)
     setIsYamlExportPanelOpen(false)
@@ -5196,6 +5388,7 @@ function App() {
       if (node.id !== selectedNodeId) {
         setExpandedAddStepsForNodeId(null)
       }
+      setLastTreeSelectionRootId(null)
       setSelectedNodeId(node.id)
     },
     [selectedNodeId],
@@ -5587,6 +5780,7 @@ function App() {
     )
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
+    setLastTreeSelectionRootId(null)
   }, [setNodes])
 
   const deleteSelectedNodes = useCallback(async () => {
@@ -5733,6 +5927,57 @@ function App() {
     setNodes,
   ])
 
+  const getSplitRootNodeId = useCallback(
+    (candidateNodeIds: string[]) => {
+      const candidateNodeIdSet = new Set(candidateNodeIds)
+
+      if (candidateNodeIds.length === 1) {
+        return candidateNodeIds[0]
+      }
+
+      if (
+        lastTreeSelectionRootId &&
+        candidateNodeIdSet.has(lastTreeSelectionRootId)
+      ) {
+        return lastTreeSelectionRootId
+      }
+
+      if (selectedNodeId && candidateNodeIdSet.has(selectedNodeId)) {
+        return selectedNodeId
+      }
+
+      if (
+        scenarioMetadata.entryNodeId &&
+        candidateNodeIdSet.has(scenarioMetadata.entryNodeId)
+      ) {
+        return scenarioMetadata.entryNodeId
+      }
+
+      return (
+        nodes
+          .filter((node) => candidateNodeIdSet.has(node.id))
+          .sort((firstNode, secondNode) => {
+            const firstStepNumber = getStepNumberFromId(firstNode.id)
+            const secondStepNumber = getStepNumberFromId(secondNode.id)
+
+            if (firstStepNumber !== secondStepNumber) {
+              return firstStepNumber - secondStepNumber
+            }
+
+            return nodes.indexOf(firstNode) - nodes.indexOf(secondNode)
+          })[0]?.id ??
+        candidateNodeIds[0] ??
+        ''
+      )
+    },
+    [
+      lastTreeSelectionRootId,
+      nodes,
+      scenarioMetadata.entryNodeId,
+      selectedNodeId,
+    ],
+  )
+
   const splitSelectedStepsToNewTab = useCallback(async () => {
     if (selectedActionNodeIds.length === 0) {
       setAppMessage('יש לבחור שלבים לפיצול')
@@ -5752,31 +5997,44 @@ function App() {
       return
     }
 
+    const splitRootId = getSplitRootNodeId(selectedActionNodeIds)
+    const orderedSplitNodeIds = getSplitOrderedNodeIds(
+      nodes,
+      edges,
+      selectedActionNodeIds,
+      splitRootId,
+    )
+    const sourceScenarioName = activeScenarioDisplayName || 'תסריט'
+    const splitScenarioName = `פיצול - ${sourceScenarioName}`
     const clonedSubgraph = cloneSubgraphWithNewIds({
       layoutMode: 'auto',
       reservedNodeIds: [],
       sourceEdges: edges,
-      sourceEntryNodeId: scenarioMetadata.entryNodeId,
-      sourceNodeIds: selectedActionNodeIds,
+      sourceEntryNodeId: splitRootId,
+      sourceNodeIds: orderedSplitNodeIds,
       sourceNodes: nodes,
     })
+    const splitEntryNodeId =
+      clonedSubgraph.entryNodeId || clonedSubgraph.nodes[0]?.id || ''
     const splitTab = {
-      ...createScenarioTab('פיצול מתסריט'),
+      ...createScenarioTab(splitScenarioName),
       edgeStyle,
       edges: clonedSubgraph.edges,
       editorViewport: initialViewport,
       nodes: clonedSubgraph.nodes,
       scenarioMetadata: {
         ...initialScenarioMetadata,
-        entryNodeId: clonedSubgraph.entryNodeId,
-        scenarioDescription: `פוצל מתוך ${activeScenarioTab?.name ?? 'תסריט'}`,
+        entryNodeId: splitEntryNodeId,
+        scenarioDescription: `פוצל מתוך ${sourceScenarioName}`,
+        glassixKnowledgeItemName: splitScenarioName,
       },
-      selectedNodeId: clonedSubgraph.nodes[0]?.id ?? null,
+      selectedNodeId: splitEntryNodeId || clonedSubgraph.nodes[0]?.id || null,
     }
     const syncedTabs = syncActiveTabInList(scenarioTabs)
 
     setScenarioTabs([...syncedTabs, splitTab])
     loadScenarioTab(splitTab)
+    setLastTreeSelectionRootId(null)
     setAppMessage('נפתחה כרטיסיית פיצול חדשה.')
 
     window.requestAnimationFrame(() => {
@@ -5786,14 +6044,14 @@ function App() {
       })
     })
   }, [
-    activeScenarioTab?.name,
+    activeScenarioDisplayName,
     createScenarioTab,
     edgeStyle,
     edges,
+    getSplitRootNodeId,
     loadScenarioTab,
     nodes,
     requestConfirmation,
-    scenarioMetadata.entryNodeId,
     scenarioTabs,
     selectedActionNodeIds,
     syncActiveTabInList,
@@ -6341,6 +6599,7 @@ function App() {
     )
     setSelectedNodeId(sourceNodeId)
     setSelectedEdgeId(null)
+    setLastTreeSelectionRootId(sourceNodeId)
     setAppMessage(
       shouldWarnNoConnectedContinuation && reachableNodeIds.size === 1
         ? 'לא נמצא המשך מחובר לאפשרות שנבחרה'
@@ -6512,6 +6771,10 @@ function App() {
       <nav className="scenario-tabs" aria-label="כרטיסיות תסריט">
         {scenarioTabs.map((tab) => {
           const isActiveTab = tab.id === activeScenarioTabId
+          const tabDisplayName = getScenarioDisplayName(
+            isActiveTab ? scenarioMetadata : tab.scenarioMetadata,
+            tab.name,
+          )
           const tabHasContent = isActiveTab
             ? nodes.length > 0 || edges.length > 0
             : hasScenarioTabContent(tab)
@@ -6526,24 +6789,50 @@ function App() {
                 .filter(Boolean)
                 .join(' ')}
             >
-              <button
-                type="button"
-                className="scenario-tabs__tab-button"
-                aria-current={isActiveTab ? 'page' : undefined}
-                onClick={() => switchScenarioTab(tab.id)}
-              >
-                <span>{tab.name}</span>
-                {tabHasContent ? (
-                  <span
-                    className="scenario-tabs__content-dot"
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </button>
+              {renamingTabId === tab.id ? (
+                <input
+                  className="scenario-tabs__rename-input"
+                  value={tabNameDraft}
+                  dir="rtl"
+                  autoFocus
+                  aria-label="עריכת שם כרטיסייה"
+                  onBlur={() => commitScenarioTabRename(tab)}
+                  onChange={(event) => setTabNameDraft(event.currentTarget.value)}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      commitScenarioTabRename(tab)
+                    }
+
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      cancelRenamingScenarioTab()
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="scenario-tabs__tab-button"
+                  aria-current={isActiveTab ? 'page' : undefined}
+                  title="לחיצה כפולה לעריכת שם התסריט"
+                  onClick={() => switchScenarioTab(tab.id)}
+                  onDoubleClick={() => startRenamingScenarioTab(tab)}
+                >
+                  <span>{tabDisplayName}</span>
+                  {tabHasContent ? (
+                    <span
+                      className="scenario-tabs__content-dot"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </button>
+              )}
               <button
                 type="button"
                 className="scenario-tabs__close-button"
-                aria-label={`סגור ${tab.name}`}
+                aria-label={`סגור ${tabDisplayName}`}
                 title="סגור כרטיסייה"
                 onClick={() => {
                   void closeScenarioTab(tab.id)
@@ -6606,6 +6895,7 @@ function App() {
 
         {appMessage ? (
           <DismissibleNotice
+            autoDismissMs={3000}
             className="app-message"
             onDismiss={() => setAppMessage('')}
           >
@@ -7103,6 +7393,7 @@ function App() {
 
             setSelectedNodeId(null)
             setSelectedEdgeId(null)
+            setLastTreeSelectionRootId(null)
             setPendingConnectionPopover(null)
           }}
           isValidConnection={isValidConnection}
